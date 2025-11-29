@@ -208,7 +208,7 @@ __marimo__/
 
 # Project specific
 outputs/
-data/
 !data/raw/conversations.csv
 nul
 get-docker.sh
+.claude/
