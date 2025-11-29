@@ -1,0 +1,8 @@
+guardrails-ai>=0.4.0
+detoxify
+torch
+transformers
+pandas>=2.0.0
+python-dotenv
+loguru
+pytest>=7.4.0
