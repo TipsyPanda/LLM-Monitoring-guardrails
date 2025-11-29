@@ -211,3 +211,4 @@ outputs/
 data/
 !data/raw/conversations.csv
 nul
+get-docker.sh
