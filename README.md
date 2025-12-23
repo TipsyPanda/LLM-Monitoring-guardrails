@@ -1,6 +1,6 @@
 # LLM Monitoring with Guardrails
 
-A Python prototype for monitoring LLM conversations and detecting toxic language using guardrails-ai. This system processes historical conversation data, detects violations, classifies them by severity (low/medium/high), and generates alerts.
+A Python prototype for monitoring LLM conversations and detecting toxic language using guardrails-ai. This system supports both batch processing of historical data and real-time Kafka-based input for pre-filtering user messages before they reach an LLM.
 
 ## Features
 
@@ -8,8 +8,11 @@ A Python prototype for monitoring LLM conversations and detecting toxic language
 - **Severity Classification**: Automatically classifies violations as LOW, MEDIUM, or HIGH
 - **Multi-output**: Logs violations to both console and file (JSONL format)
 - **Configurable Thresholds**: Adjust toxicity detection sensitivity
+- **Two Input Modes**:
+  - **Batch Mode**: Process CSV files for historical analysis
+  - **Kafka Input Mode**: Real-time pre-filtering of user messages via Kafka
+- **Alert Aggregation**: Time-windowed alert generation from violations
 - **Test Dataset**: Includes sample conversations for quick testing
-- **Extensible**: Ready for Phase 2 Kafka integration
 
 ## Project Structure
 
@@ -17,20 +20,34 @@ A Python prototype for monitoring LLM conversations and detecting toxic language
 LLM-Monitoring-guardrails/
 ├── src/
 │   ├── config.py                    # Configuration management
-│   ├── main.py                      # Main execution pipeline
+│   ├── main.py                      # Batch mode entry point
+│   ├── guardrail_input_processor.py # Kafka input mode entry point
+│   ├── alert_consumer.py            # Alert aggregation service
+│   ├── kafka/
+│   │   ├── conversation_consumer.py # Kafka consumer for input messages
+│   │   └── violation_producer.py    # Kafka producer for violations
+│   ├── alert/
+│   │   ├── window_tracker.py        # Sliding window for violations
+│   │   └── alert_generator.py       # Alert generation logic
 │   ├── models/
 │   │   ├── conversation.py          # Conversation data model
-│   │   └── violation.py             # Violation/alert data model
+│   │   ├── violation.py             # Violation data model
+│   │   └── alert.py                 # Alert data model
 │   └── processors/
-│       ├── dataset_loader.py        # Load conversation data
+│       ├── dataset_loader.py        # Load conversation data from CSV
 │       └── guardrail_processor.py   # ToxicLanguage detection
+├── scripts/
+│   └── mock_conversation_producer.py # Test producer for Kafka input
 ├── data/
 │   └── raw/
-│       └── conversations.csv        # Test dataset (8 samples)
+│       └── conversations.csv        # Test dataset
 ├── tests/
 │   └── test_guardrail_processor.py  # Unit tests
-├── outputs/                          # Generated violations (gitignored)
-│   └── violations.jsonl
+├── outputs/                          # Generated outputs (gitignored)
+│   ├── violations.jsonl             # Batch mode violations
+│   ├── kafka_violations.jsonl       # Kafka mode violations
+│   └── alerts.jsonl                 # Generated alerts
+├── docker-compose.yml               # Kafka infrastructure
 ├── requirements.txt                  # Python dependencies
 ├── .env.example                     # Environment variables template
 └── README.md
@@ -86,41 +103,70 @@ LLM-Monitoring-guardrails/
 
 ## Usage
 
-### Run the Prototype
+### Batch Mode (CSV Processing)
 
-Process the test dataset and generate violation alerts:
+Process a CSV dataset and generate violation alerts:
 
 ```bash
 python -m src.main
 ```
 
-### Expected Output
-
-**Console output**:
+**Expected Output**:
 ```
 2025-01-15 10:30:00 | INFO | Starting conversation processing...
 2025-01-15 10:30:05 | WARNING | [HIGH] Violation in conv_003 | Labels: insult, toxicity
 2025-01-15 10:30:07 | WARNING | [HIGH] Violation in conv_005 | Labels: threat, toxicity
-2025-01-15 10:30:09 | WARNING | [MEDIUM] Violation in conv_007 | Labels: insult, obscene
 
 ==================================================
 Processing Complete!
 Total conversations: 8
 Total violations: 3
-Severity breakdown:
-  LOW: 0
-  MEDIUM: 1
-  HIGH: 2
-
-Results saved to: outputs/violations.jsonl
 ==================================================
 ```
 
-**File output** ([outputs/violations.jsonl](outputs/violations.jsonl)):
-```json
-{"conversation_id": "conv_003", "timestamp": "2025-01-15T10:10:00", "original_text": "You're an idiot...", "severity": "high", ...}
-{"conversation_id": "conv_005", "timestamp": "2025-01-15T10:20:00", "original_text": "I will destroy...", "severity": "high", ...}
+### Kafka Input Mode (Real-time Pre-filtering)
+
+Pre-filter user messages before they reach an LLM. Messages are consumed from Kafka, checked through guardrails, and violations are published to a violations topic.
+
+**1. Start Kafka infrastructure:**
+```bash
+docker compose up -d
 ```
+
+**2. Start the guardrail input processor (Terminal 1):**
+```bash
+python -m src.guardrail_input_processor
+```
+
+**3. Start the alert consumer (Terminal 2):**
+```bash
+python -m src.alert_consumer
+```
+
+**4. Send test messages with the mock producer (Terminal 3):**
+```bash
+# Random mix (30% toxic, 70% clean)
+python scripts/mock_conversation_producer.py --mode random --interval 2
+
+# Only toxic messages
+python scripts/mock_conversation_producer.py --mode toxic --interval 1
+
+# Replay CSV file through Kafka
+python scripts/mock_conversation_producer.py --mode csv --csv-path data/raw/conversations.csv
+```
+
+**Mock Producer Options:**
+| Option | Description |
+|--------|-------------|
+| `--mode random` | 30% toxic, 70% clean messages (default) |
+| `--mode toxic` | Only toxic messages |
+| `--mode clean` | Only clean messages |
+| `--mode csv` | Replay existing CSV file |
+| `--interval 2` | Seconds between messages (default: 2) |
+| `--count 10` | Send only N messages (default: infinite) |
+
+**Kafka UI:**
+Monitor messages at http://localhost:8080
 
 ### Run Tests
 
@@ -132,13 +178,36 @@ pytest tests/ -v
 
 Configuration can be adjusted via environment variables or [src/config.py](src/config.py):
 
+### Core Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TOXICITY_THRESHOLD` | `0.5` | Minimum toxicity score to flag (0-1) |
+| `OUTPUT_DIR` | `outputs` | Directory for output files |
+
+### Batch Mode Settings
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATASET_PATH` | `data/raw/conversations.csv` | Path to conversation dataset |
-| `TOXICITY_THRESHOLD` | `0.5` | Minimum toxicity score to flag (0-1) |
-| `OUTPUT_DIR` | `outputs` | Directory for violation logs |
-| `HIGH_SEVERITY_THRESHOLD` | `0.7` | Threshold for HIGH severity |
-| `MEDIUM_SEVERITY_THRESHOLD` | `0.6` | Threshold for MEDIUM severity |
+| `KAFKA_ENABLED` | `true` | Send violations to Kafka in batch mode |
+
+### Kafka Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker address |
+| `KAFKA_TOPIC` | `guardrail.violations` | Output topic for violations |
+| `KAFKA_INPUT_TOPIC` | `llm.conversations` | Input topic for user messages |
+| `KAFKA_INPUT_CONSUMER_GROUP` | `guardrail-input-processor-group` | Consumer group for input processor |
+
+### Alert Consumer Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ALERT_WINDOW_SIZE_SECONDS` | `300` | Time window for alert aggregation (5 min) |
+| `ALERT_OUTPUT_FILE` | `outputs/alerts.jsonl` | Alert output file |
+| `ALERT_CONSUMER_GROUP` | `alert-consumer-group` | Consumer group for alerts |
 
 ## Dataset Format
 
@@ -222,15 +291,49 @@ To add new guardrails:
 2. Import in [guardrail_processor.py](src/processors/guardrail_processor.py)
 3. Add to the Guard chain: `self.guard.use(NewValidator(...))`
 
-## Phase 2: Kafka Integration (Planned)
+## Architecture
 
-Future enhancements will include:
+### Data Flow
 
-- **Kafka Producer**: Stream violations to Kafka topics
-- **Kafka Consumer**: Real-time alert aggregation
-- **Docker Compose**: Local Kafka setup for development
-- **Time-windowed Analysis**: Alert aggregation over time periods
-- **Dashboard**: Real-time monitoring interface
+```
+KAFKA INPUT MODE (real-time pre-filtering):
+User Message --> llm.conversations (Kafka) --> GuardrailInputProcessor --> guardrail.violations (Kafka) --> AlertConsumer --> alerts.jsonl
+
+BATCH MODE (historical analysis):
+CSV File --> DatasetLoader --> GuardrailProcessor --> guardrail.violations (Kafka) --> AlertConsumer --> alerts.jsonl
+```
+
+### Kafka Topics
+
+| Topic | Description |
+|-------|-------------|
+| `llm.conversations` | Input: User messages to be checked before reaching LLM |
+| `guardrail.violations` | Output: Detected toxic content violations |
+
+### Message Formats
+
+**Input Message (llm.conversations):**
+```json
+{
+  "conversation_id": "conv_abc123",
+  "text": "User message content",
+  "timestamp": "2025-01-15T10:30:00",
+  "speaker": "user"
+}
+```
+
+**Violation Message (guardrail.violations):**
+```json
+{
+  "conversation_id": "conv_abc123",
+  "timestamp": "2025-01-15T10:30:00",
+  "original_text": "Toxic message...",
+  "severity": "high",
+  "toxicity_labels": ["toxicity", "insult"],
+  "toxic_sentences": ["Toxic message..."],
+  "metadata": {"scores": {"toxicity": 0.95}}
+}
+```
 
 ## Troubleshooting
 
@@ -247,6 +350,12 @@ Future enhancements will include:
 
 **Issue**: Tests fail with model download errors
 - **Solution**: First run may download ML models (detoxify). Ensure internet connection is stable.
+
+**Issue**: Kafka connection refused
+- **Solution**: Ensure Docker containers are running: `docker compose up -d`
+
+**Issue**: `NoBrokersAvailable` error
+- **Solution**: Wait a few seconds after starting Kafka, or check `docker compose logs kafka`
 
 ## License
 

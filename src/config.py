@@ -25,3 +25,13 @@ class AlertConfig:
     ALERT_WINDOW_SIZE_SECONDS: int = int(os.getenv("ALERT_WINDOW_SIZE_SECONDS", "300"))
     ALERT_OUTPUT_FILE: str = os.getenv("ALERT_OUTPUT_FILE", "outputs/alerts.jsonl")
     ALERT_CONSUMER_GROUP: str = os.getenv("ALERT_CONSUMER_GROUP", "alert-consumer-group")
+
+@dataclass
+class KafkaInputConfig:
+    """Configuration for Kafka input processor service"""
+    KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    KAFKA_INPUT_TOPIC: str = os.getenv("KAFKA_INPUT_TOPIC", "llm.conversations")
+    KAFKA_OUTPUT_TOPIC: str = os.getenv("KAFKA_TOPIC", "guardrail.violations")
+    KAFKA_INPUT_CONSUMER_GROUP: str = os.getenv("KAFKA_INPUT_CONSUMER_GROUP", "guardrail-input-processor-group")
+    TOXICITY_THRESHOLD: float = float(os.getenv("TOXICITY_THRESHOLD", "0.5"))
+    KAFKA_INPUT_OUTPUT_FILE: str = os.getenv("KAFKA_INPUT_OUTPUT_FILE", "outputs/kafka_violations.jsonl")
