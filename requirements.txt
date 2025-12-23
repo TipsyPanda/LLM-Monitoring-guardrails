@@ -7,6 +7,10 @@ transformers
 # Data processing
 pandas>=2.0.0
 
+# Dashboard
+streamlit>=1.29.0
+plotly>=5.18.0
+
 # Configuration and logging
 python-dotenv
 loguru

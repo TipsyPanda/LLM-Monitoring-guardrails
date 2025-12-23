@@ -47,6 +47,21 @@ LLM-Monitoring-guardrails/
 │   ├── violations.jsonl             # Batch mode violations
 │   ├── kafka_violations.jsonl       # Kafka mode violations
 │   └── alerts.jsonl                 # Generated alerts
+├── dashboard/                        # Streamlit monitoring dashboard
+│   ├── app.py                       # Main dashboard application
+│   ├── config.py                    # Dashboard configuration
+│   ├── components/                  # UI components
+│   │   ├── metrics.py               # KPI metric cards
+│   │   ├── charts.py                # Plotly charts
+│   │   ├── tables.py                # Data tables
+│   │   └── filters.py               # Sidebar filters
+│   └── data/                        # Data loading/processing
+│       ├── loader.py                # JSONL file loading
+│       └── processor.py             # Data transformations
+├── start.sh                         # Automated startup script
+├── stop.sh                          # Shutdown script
+├── status.sh                        # Status checker
+├── run_dashboard.sh                 # Dashboard launch script
 ├── docker-compose.yml               # Kafka infrastructure
 ├── requirements.txt                  # Python dependencies
 ├── .env.example                     # Environment variables template
@@ -100,6 +115,88 @@ LLM-Monitoring-guardrails/
    ```
 
    Edit [.env](.env) to customize configuration if needed.
+
+## Quick Start
+
+### Automated Startup (Recommended)
+
+Use the provided shell scripts for easy startup and management:
+
+```bash
+cd ~/LLM-Monitoring-guardrails
+./start.sh
+```
+
+The `start.sh` script automatically:
+- Checks if you're in the right directory
+- Verifies virtual environment exists
+- Activates virtual environment (if not already)
+- Checks Python dependencies are installed
+- Verifies Docker is installed and accessible
+- Creates .env file if missing
+- Starts Docker containers if not running
+- Waits for Kafka to be ready
+- Offers to start the alert consumer
+
+### Utility Scripts
+
+| Script | Description |
+|--------|-------------|
+| `./start.sh` | Start all services (Kafka, processors) |
+| `./stop.sh` | Stop all services, optionally remove Docker volumes |
+| `./status.sh` | Check status of all components |
+| `./run_dashboard.sh` | Launch the monitoring dashboard |
+
+### Check Status
+
+```bash
+./status.sh
+```
+
+Shows:
+- Virtual environment status
+- Docker containers status
+- Kafka connectivity
+- Running Python processes
+- Output file statistics
+- Dataset information
+
+### Stop All Services
+
+```bash
+./stop.sh
+```
+
+Cleanly stops Docker containers and optionally removes volumes.
+
+### Quick Commands
+
+```bash
+# Check everything is running
+./status.sh
+
+# Start everything
+./start.sh
+
+# Stop everything
+./stop.sh
+
+# View Kafka UI
+# Open in browser: http://localhost:8080
+
+# View logs
+tail -f outputs/violations.jsonl
+tail -f outputs/alerts.jsonl
+
+# Check Docker containers
+docker compose ps
+
+# Stop Docker containers only
+docker compose down
+
+# Restart Docker containers
+docker compose restart
+```
 
 ## Usage
 
@@ -172,6 +269,74 @@ Monitor messages at http://localhost:8080
 
 ```bash
 pytest tests/ -v
+```
+
+## Monitoring Dashboard
+
+A Streamlit-based dashboard for visualizing violations, alerts, and toxicity metrics in real-time.
+
+### Starting the Dashboard
+
+```bash
+./run_dashboard.sh
+```
+
+The dashboard will be available at **http://localhost:8501**
+
+### Dashboard Features
+
+| Feature | Description |
+|---------|-------------|
+| **Metric Cards** | Total violations, alerts, high severity counts |
+| **Time Series Charts** | Violations and alerts over time by severity/danger level |
+| **Label Distribution** | Horizontal bar chart of toxicity label frequency |
+| **Severity Breakdown** | Pie charts showing severity and danger level distribution |
+| **Score Heatmap** | Visual heatmap of toxicity scores across categories |
+| **Interactive Tables** | Paginated, sortable tables for violations and alerts |
+
+### Sidebar Filters
+
+- **Data Source**: Filter by batch (CSV), Kafka (real-time), or both
+- **Date Range**: Select start and end dates
+- **Severity Levels**: Filter by LOW, MEDIUM, HIGH
+- **Toxicity Labels**: Filter by specific toxicity categories
+- **Conversation Search**: Search by conversation ID
+- **Minimum Score**: Set threshold for toxicity score
+- **Auto Refresh**: Enable automatic refresh (5-300 seconds)
+
+### Dashboard Layout
+
+```
++------------------------------------------+
+|        LLM Monitoring Dashboard          |
++------------------------------------------+
+| SIDEBAR      |   MAIN CONTENT            |
+| - Source     | +------------------------+|
+| - Date Range | |  METRIC CARDS          ||
+| - Severity   | | [Total][High][Med][Low]||
+| - Labels     | +------------------------+|
+| - Refresh    | +------------------------+|
+|              | |  TIME SERIES CHARTS    ||
+|              | |  Violations | Alerts   ||
+|              | +------------------------+|
+|              | +----------+-------------+|
+|              | | TOXICITY | SEVERITY   ||
+|              | | BAR CHART| PIE CHART  ||
+|              | +----------+-------------+|
+|              | +------------------------+|
+|              | |  DATA TABLES (Tabs)    ||
+|              | |  Violations | Alerts   ||
+|              | +------------------------+|
++------------------------------------------+
+```
+
+### Manual Dashboard Start
+
+If you prefer to run directly with Streamlit:
+
+```bash
+source venv/bin/activate
+streamlit run dashboard/app.py --server.port 8501
 ```
 
 ## Configuration
@@ -356,6 +521,30 @@ CSV File --> DatasetLoader --> GuardrailProcessor --> guardrail.violations (Kafk
 
 **Issue**: `NoBrokersAvailable` error
 - **Solution**: Wait a few seconds after starting Kafka, or check `docker compose logs kafka`
+
+**Issue**: Docker permission error
+- **Solution**: Add your user to the docker group:
+  ```bash
+  sudo usermod -aG docker $USER
+  newgrp docker
+  # Or log out and back in
+  ```
+
+**Issue**: Port already in use (9092 or 8080)
+- **Solution**: Check what's using the port:
+  ```bash
+  sudo lsof -i :9092
+  sudo lsof -i :8080
+  ```
+
+**Issue**: Virtual environment issues
+- **Solution**: Remove and recreate:
+  ```bash
+  rm -rf venv
+  python3 -m venv venv
+  source venv/bin/activate
+  pip install -r requirements.txt
+  ```
 
 ## License
 
