@@ -22,7 +22,6 @@ import argparse
 from datetime import datetime
 from kafka import KafkaProducer
 from loguru import logger
-import uuid
 import sys
 import os
 
@@ -53,6 +52,20 @@ TOXIC_MESSAGES = [
     "I hate you and everything you stand for!",
     "Shut up you worthless piece of garbage!",
     "You're completely useless and should be fired!",
+]
+
+# Preset conversation IDs for consistent testing
+CONVERSATION_IDS = [
+    "conv_user_001",
+    "conv_user_002",
+    "conv_user_003",
+    "conv_user_004",
+    "conv_user_005",
+    "conv_user_006",
+    "conv_user_007",
+    "conv_user_008",
+    "conv_user_009",
+    "conv_user_010",
 ]
 
 
@@ -98,7 +111,7 @@ class MockConversationProducer:
                 text = random.choice(CLEAN_MESSAGES)
 
         return {
-            'conversation_id': f"conv_{uuid.uuid4().hex[:8]}",
+            'conversation_id': random.choice(CONVERSATION_IDS),
             'text': text,
             'timestamp': datetime.now().isoformat(),
             'speaker': 'user'
