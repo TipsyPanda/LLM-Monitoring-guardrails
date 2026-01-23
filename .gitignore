@@ -212,3 +212,5 @@ outputs/
 nul
 get-docker.sh
 .claude/
+.DS_Store
+data/
