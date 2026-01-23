@@ -12,6 +12,8 @@ A Python prototype for monitoring LLM conversations and detecting toxic language
   - **Batch Mode**: Process CSV files for historical analysis
   - **Kafka Input Mode**: Real-time pre-filtering of user messages via Kafka
 - **Alert Aggregation**: Time-windowed alert generation from violations
+- **Dockerized Architecture**: Fully containerized with horizontal scaling support
+- **Horizontally Scalable**: Run multiple guardrails processors in parallel
 - **Test Dataset**: Includes sample conversations for quick testing
 
 ## Project Structure
@@ -37,7 +39,8 @@ LLM-Monitoring-guardrails/
 │       ├── dataset_loader.py        # Load conversation data from CSV
 │       └── guardrail_processor.py   # ToxicLanguage detection
 ├── scripts/
-│   └── mock_conversation_producer.py # Test producer for Kafka input
+│   ├── mock_conversation_producer.py # Test producer for Kafka input
+│   └── fast_ingest_lmsys.py        # Fast LMSYS dataset ingestion
 ├── data/
 │   └── raw/
 │       └── conversations.csv        # Test dataset
@@ -62,8 +65,12 @@ LLM-Monitoring-guardrails/
 ├── stop.sh                          # Shutdown script
 ├── status.sh                        # Status checker
 ├── run_dashboard.sh                 # Dashboard launch script
-├── docker-compose.yml               # Kafka infrastructure
-├── requirements.txt                  # Python dependencies
+├── docker-compose.yml               # Multi-container orchestration
+├── Dockerfile.guardrails            # Guardrails processor container
+├── Dockerfile.alert-consumer        # Alert consumer container
+├── .dockerignore                    # Docker build exclusions
+├── prepare_lmsys_dataset.py         # LMSYS dataset preparation
+├── requirements.txt                 # Python dependencies
 ├── .env.example                     # Environment variables template
 └── README.md
 ```
@@ -72,9 +79,29 @@ LLM-Monitoring-guardrails/
 
 ### Prerequisites
 
-- Python 3.8 or higher
-- pip package manager
-- Virtual environment (recommended)
+- **Docker & Docker Compose**: Required for running Kafka and containerized services
+- **Python 3.8 or higher**: For local development and dataset ingestion
+- **pip package manager**: Python package installer
+- **Virtual environment**: Recommended for local development
+
+### Docker Installation
+
+If you don't have Docker installed:
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get update
+sudo apt-get install docker.io docker-compose
+sudo systemctl start docker
+sudo usermod -aG docker $USER  # Add user to docker group
+# Log out and back in for group changes to take effect
+```
+
+**macOS:**
+- Download and install [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/)
+
+**Windows:**
+- Download and install [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/)
 
 ### Setup Steps
 
@@ -171,36 +198,162 @@ Cleanly stops Docker containers and optionally removes volumes.
 
 ### Quick Commands
 
+**Docker (Recommended):**
 ```bash
+# Start all services (build first time)
+docker compose up --build
+
+# Start in background
+docker compose up --build -d
+
+# Scale guardrails processors
+docker compose up --scale guardrails-processor=3 -d
+
+# View logs
+docker compose logs -f guardrails-processor
+docker compose logs -f alert-consumer
+
+# Check status
+docker compose ps
+
+# Stop services
+docker compose down
+
+# Stop and remove all data
+docker compose down -v
+```
+
+**Ingesting Data:**
+```bash
+# Activate virtual environment
+source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate     # Windows
+
+# Ingest LMSYS dataset to Kafka
+python prepare_lmsys_dataset.py --kafka --sample-size 1000
+
+# Or use mock producer
+python scripts/mock_conversation_producer.py --mode random --interval 2
+```
+
+**Monitoring:**
+```bash
+# Kafka UI (topics, messages, consumer groups)
+open http://localhost:8080
+
+# View outputs
+cat outputs/alerts.jsonl | jq .
+cat outputs/kafka_violations.jsonl | jq .
+
+# Dashboard
+./run_dashboard.sh
+# Then open http://localhost:8501
+```
+
+**Legacy Scripts:**
+```bash
+# Automated startup script (local development mode)
+./start.sh
+
 # Check everything is running
 ./status.sh
 
-# Start everything
-./start.sh
-
 # Stop everything
 ./stop.sh
-
-# View Kafka UI
-# Open in browser: http://localhost:8080
-
-# View logs
-tail -f outputs/violations.jsonl
-tail -f outputs/alerts.jsonl
-
-# Check Docker containers
-docker compose ps
-
-# Stop Docker containers only
-docker compose down
-
-# Restart Docker containers
-docker compose restart
 ```
 
 ## Usage
 
-### Batch Mode (CSV Processing)
+### Docker Deployment (Recommended)
+
+The recommended way to run the system is using Docker Compose, which provides a fully containerized, horizontally scalable architecture.
+
+#### Start All Services
+
+```bash
+# Build and start all services (Kafka + Guardrails + Alerts)
+docker compose up --build
+
+# Or run in detached mode (background)
+docker compose up --build -d
+```
+
+This starts:
+- **Kafka & Zookeeper**: Message broker infrastructure
+- **Guardrails Processor(s)**: Consume from `llm.conversations`, detect toxicity, produce to `guardrail.violations`
+- **Alert Consumer**: Aggregates violations into time-windowed alerts
+- **Kafka UI**: Web interface at http://localhost:8080
+
+#### Verify Services Are Running
+
+```bash
+# Check all containers
+docker compose ps
+
+# Watch guardrails processor logs
+docker compose logs -f guardrails-processor
+
+# Watch alert consumer logs
+docker compose logs -f alert-consumer
+
+# View all logs
+docker compose logs -f
+```
+
+#### Ingest Test Data
+
+From your host machine (with virtual environment activated):
+
+```bash
+# Ingest LMSYS dataset directly to Kafka
+python prepare_lmsys_dataset.py --kafka --sample-size 100
+
+# Or use the mock producer
+python scripts/mock_conversation_producer.py --mode random --interval 2
+```
+
+#### Check Outputs
+
+```bash
+# View generated alerts
+cat outputs/alerts.jsonl
+
+# View violations
+cat outputs/kafka_violations.jsonl
+```
+
+#### Horizontal Scaling
+
+Scale the number of guardrails processors to handle higher throughput:
+
+```bash
+# Scale to 3 processors
+docker compose up --scale guardrails-processor=3 -d
+
+# Scale to 5 processors
+docker compose up --scale guardrails-processor=5 -d
+
+# Scale back to 1
+docker compose up --scale guardrails-processor=1 -d
+```
+
+Kafka consumer groups automatically distribute work across instances. Each processor joins the same consumer group (`guardrail-input-processor-group`) and Kafka rebalances partitions across them.
+
+#### Stop Services
+
+```bash
+# Stop and remove containers
+docker compose down
+
+# Stop and remove containers + volumes (reset Kafka data)
+docker compose down -v
+```
+
+### Local Development Mode
+
+For local development without Docker, you can run services manually:
+
+#### Batch Mode (CSV Processing)
 
 Process a CSV dataset and generate violation alerts:
 
@@ -221,13 +374,11 @@ Total violations: 3
 ==================================================
 ```
 
-### Kafka Input Mode (Real-time Pre-filtering)
-
-Pre-filter user messages before they reach an LLM. Messages are consumed from Kafka, checked through guardrails, and violations are published to a violations topic.
+#### Kafka Input Mode (Manual Setup)
 
 **1. Start Kafka infrastructure:**
 ```bash
-docker compose up -d
+docker compose up -d zookeeper kafka kafka-ui
 ```
 
 **2. Start the guardrail input processor (Terminal 1):**
@@ -396,17 +547,43 @@ conv_001,"I need help with my order",2025-01-15T10:30:15,user
 2. Update `DATASET_PATH` in [.env](.env) or [src/config.py](src/config.py)
 3. Run the processor: `python -m src.main`
 
-### Larger Datasets
+### LMSYS Chatbot Arena Dataset
 
-For testing with real conversation data, consider:
+The system includes a built-in script to download and ingest the LMSYS Chatbot Arena dataset (33K real conversations) directly into Kafka:
 
-1. **LMSYS Chatbot Arena** (33K conversations):
-   ```bash
-   pip install datasets
-   python -c "from datasets import load_dataset; dataset = load_dataset('lmsys/chatbot_arena_conversations')"
-   ```
+```bash
+# Download and send to Kafka (default behavior)
+python prepare_lmsys_dataset.py --sample-size 1000
 
-2. **Create synthetic data** with known toxic examples for validation
+# Send only user messages (skip agent responses)
+python prepare_lmsys_dataset.py --sample-size 1000 --user-only
+
+# Save to CSV instead of Kafka
+python prepare_lmsys_dataset.py --sample-size 1000 --csv
+
+# Both Kafka and CSV
+python prepare_lmsys_dataset.py --sample-size 1000 --kafka --csv
+
+# Just analyze without ingesting
+python prepare_lmsys_dataset.py --sample-size 100 --analyze-only
+```
+
+**Options:**
+- `--sample-size N`: Download only N conversations (default: all ~33K)
+- `--kafka`: Send directly to Kafka `llm.conversations` topic
+- `--csv`: Save to CSV file
+- `--user-only`: Only send user messages (skip agent responses)
+- `--analyze-only`: Show statistics without saving
+
+**Requirements:**
+```bash
+pip install datasets
+```
+
+### Other Dataset Options
+
+1. **Create synthetic data** with known toxic examples for validation
+2. **Use your own CSV** with the required format (see above)
 
 ## How It Works
 
@@ -458,14 +635,84 @@ To add new guardrails:
 
 ## Architecture
 
+### Docker Container Architecture
+
+The system runs as multiple Docker containers orchestrated by Docker Compose:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Host Machine                          │
+│                                                              │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              Docker Compose Network                     │ │
+│  │                                                          │ │
+│  │  ┌──────────────┐      ┌──────────────┐                │ │
+│  │  │  Zookeeper   │◄─────┤    Kafka     │                │ │
+│  │  │  :2181       │      │  :9092/:29092│                │ │
+│  │  └──────────────┘      └───────┬──────┘                │ │
+│  │                                 │                        │ │
+│  │                        ┌────────┴────────┐              │ │
+│  │                        │                 │              │ │
+│  │                   Topic: llm.conversations              │ │
+│  │                        │                 │              │ │
+│  │         ┌──────────────┼─────────────────┼────────┐    │ │
+│  │         │              │                 │        │    │ │
+│  │  ┌──────▼───────┐ ┌───▼──────────┐ ┌───▼─────┐  │    │ │
+│  │  │ Guardrails-1 │ │ Guardrails-2 │ │  ...    │  │    │ │
+│  │  │ Processor    │ │ Processor    │ │ (scale) │  │    │ │
+│  │  │ (Container)  │ │ (Container)  │ │         │  │    │ │
+│  │  └──────┬───────┘ └───┬──────────┘ └───┬─────┘  │    │ │
+│  │         │              │                 │        │    │ │
+│  │         └──────────────┼─────────────────┘        │    │ │
+│  │                        │                          │    │ │
+│  │                Topic: guardrail.violations        │    │ │
+│  │                        │                          │    │ │
+│  │                  ┌─────▼────────┐                │    │ │
+│  │                  │    Alert     │                │    │ │
+│  │                  │   Consumer   │                │    │ │
+│  │                  │ (Container)  │                │    │ │
+│  │                  └──────┬───────┘                │    │ │
+│  │                         │                         │    │ │
+│  │                  outputs/alerts.jsonl            │    │ │
+│  │                                                   │    │ │
+│  │  ┌──────────────┐                                │    │ │
+│  │  │   Kafka UI   │                                │    │ │
+│  │  │   :8080      │                                │    │ │
+│  │  └──────────────┘                                │    │ │
+│  └──────────────────────────────────────────────────┘    │
+│                                                            │
+│  Exposed Ports:                                           │
+│    - Kafka: localhost:9092 (external)                     │
+│    - Kafka UI: localhost:8080                             │
+│    - Zookeeper: localhost:2181                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Key Features:**
+- **Horizontal Scaling**: Run 1-N guardrails processors by scaling the container
+- **Automatic Load Balancing**: Kafka consumer groups distribute partitions across processors
+- **Fault Tolerance**: Containers restart on failure
+- **Internal Networking**: Services communicate via Docker network (`kafka:29092`)
+- **Volume Mounts**: Outputs persist to host `./outputs/` directory
+
 ### Data Flow
 
 ```
-KAFKA INPUT MODE (real-time pre-filtering):
-User Message --> llm.conversations (Kafka) --> GuardrailInputProcessor --> guardrail.violations (Kafka) --> AlertConsumer --> alerts.jsonl
+DOCKER MODE (containerized, scalable):
+User Message
+  → llm.conversations (Kafka topic)
+  → Guardrails Processor Container(s) [1-N instances]
+  → guardrail.violations (Kafka topic)
+  → Alert Consumer Container
+  → outputs/alerts.jsonl
 
-BATCH MODE (historical analysis):
-CSV File --> DatasetLoader --> GuardrailProcessor --> guardrail.violations (Kafka) --> AlertConsumer --> alerts.jsonl
+BATCH MODE (local processing):
+CSV File
+  → DatasetLoader
+  → GuardrailProcessor
+  → guardrail.violations (Kafka, optional)
+  → AlertConsumer
+  → outputs/violations.jsonl
 ```
 
 ### Kafka Topics
@@ -474,6 +721,13 @@ CSV File --> DatasetLoader --> GuardrailProcessor --> guardrail.violations (Kafk
 |-------|-------------|
 | `llm.conversations` | Input: User messages to be checked before reaching LLM |
 | `guardrail.violations` | Output: Detected toxic content violations |
+
+### Consumer Groups
+
+| Consumer Group | Service | Instances | Purpose |
+|----------------|---------|-----------|---------|
+| `guardrail-input-processor-group` | Guardrails Processor | 1-N | Scales horizontally; Kafka distributes partitions |
+| `alert-consumer-group` | Alert Consumer | 1 | Single aggregator for time-windowed alerts |
 
 ### Message Formats
 
@@ -502,7 +756,59 @@ CSV File --> DatasetLoader --> GuardrailProcessor --> guardrail.violations (Kafk
 
 ## Troubleshooting
 
-### Common Issues
+### Docker Issues
+
+**Issue**: Docker containers fail to start
+- **Solution**: Check Docker daemon is running:
+  ```bash
+  sudo systemctl status docker
+  sudo systemctl start docker  # If not running
+  ```
+
+**Issue**: `docker compose` command not found
+- **Solution**: Use `docker-compose` (with hyphen) on older Docker versions:
+  ```bash
+  docker-compose up --build
+  ```
+
+**Issue**: Permission denied when accessing Docker
+- **Solution**: Add your user to the docker group:
+  ```bash
+  sudo usermod -aG docker $USER
+  newgrp docker
+  # Or log out and back in
+  ```
+
+**Issue**: Containers crash immediately after starting
+- **Solution**: Check logs for specific errors:
+  ```bash
+  docker compose logs guardrails-processor
+  docker compose logs alert-consumer
+  docker compose logs kafka
+  ```
+
+**Issue**: "Cannot connect to Kafka" from containers
+- **Solution**: Containers must use `kafka:29092` not `localhost:9092`. Check environment variables in docker-compose.yml.
+
+**Issue**: Build fails with "no space left on device"
+- **Solution**: Clean up Docker images and volumes:
+  ```bash
+  docker system prune -a
+  docker volume prune
+  ```
+
+**Issue**: Slow first build (~2-3GB image)
+- **Solution**: This is normal. ML models (torch, transformers, detoxify) are large. Subsequent builds use cached layers.
+
+**Issue**: Models downloading during container runtime
+- **Solution**: First run downloads detoxify models to container. They persist in the container until rebuilt.
+
+**Issue**: Scaling doesn't increase throughput
+- **Solution**:
+  1. Ensure Kafka topic has enough partitions (1 partition = max 1 consumer)
+  2. Check partition assignment: `docker exec llm-guardrails-kafka kafka-consumer-groups --describe --group guardrail-input-processor-group --bootstrap-server localhost:9092`
+
+### Application Issues
 
 **Issue**: `ModuleNotFoundError: No module named 'guardrails'`
 - **Solution**: Ensure you've activated the virtual environment and run `pip install -r requirements.txt`
@@ -516,19 +822,11 @@ CSV File --> DatasetLoader --> GuardrailProcessor --> guardrail.violations (Kafk
 **Issue**: Tests fail with model download errors
 - **Solution**: First run may download ML models (detoxify). Ensure internet connection is stable.
 
-**Issue**: Kafka connection refused
+**Issue**: Kafka connection refused (local development)
 - **Solution**: Ensure Docker containers are running: `docker compose up -d`
 
 **Issue**: `NoBrokersAvailable` error
 - **Solution**: Wait a few seconds after starting Kafka, or check `docker compose logs kafka`
-
-**Issue**: Docker permission error
-- **Solution**: Add your user to the docker group:
-  ```bash
-  sudo usermod -aG docker $USER
-  newgrp docker
-  # Or log out and back in
-  ```
 
 **Issue**: Port already in use (9092 or 8080)
 - **Solution**: Check what's using the port:
@@ -550,14 +848,28 @@ CSV File --> DatasetLoader --> GuardrailProcessor --> guardrail.violations (Kafk
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
 
-## Contributing
+## Production Considerations
 
-This is a school project prototype. For production use, consider:
-- More robust error handling
-- Batch processing for large datasets
-- Database integration for violation storage
-- Authentication and authorization
-- Rate limiting and monitoring
+This system provides a solid foundation for production use with Docker containerization and horizontal scaling. For full production deployment, consider:
+
+**Already Implemented:**
+- ✅ Docker containerization
+- ✅ Horizontal scaling for guardrails processors
+- ✅ Kafka-based message queue for reliability
+- ✅ Consumer groups for load balancing
+- ✅ Automatic restart on failure
+- ✅ Volume mounts for persistent outputs
+
+**Additional Recommendations:**
+- Kafka replication factor > 1 for high availability
+- Resource limits in docker-compose.yml (CPU/memory)
+- Health checks for all services
+- Prometheus/Grafana for metrics and monitoring
+- Log aggregation (ELK stack, Loki)
+- Authentication for Kafka (SASL/SSL)
+- Database integration for long-term violation storage
+- API gateway for external access
+- Kubernetes deployment for cloud scaling
 
 ## Contact
 

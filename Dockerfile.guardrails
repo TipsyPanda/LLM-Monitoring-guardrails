@@ -1,0 +1,53 @@
+# Builder stage - install dependencies and configure guardrails
+FROM python:3.10-slim AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Accept guardrails token as build argument
+ARG GUARDRAILS_TOKEN
+
+# Install system dependencies needed for building packages
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy requirements and install Python dependencies in venv
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Configure guardrails with token and install validator
+# This must be done AFTER requirements.txt installation
+RUN if [ -n "$GUARDRAILS_TOKEN" ]; then \
+        guardrails configure --enable-metrics --enable-remote-inferencing --token "$GUARDRAILS_TOKEN" && \
+        guardrails hub install hub://guardrails/toxic_language --quiet; \
+    else \
+        echo "ERROR: GUARDRAILS_TOKEN build argument is required" && exit 1; \
+    fi
+
+# Final stage - minimal runtime image
+FROM python:3.10-slim
+
+# Set working directory
+WORKDIR /app
+
+# Set environment variables to avoid writing .pyc files and to unbuffer Python output
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy source code
+COPY src/ ./src/
+
+# Create outputs directory
+RUN mkdir -p /app/outputs
+
+# Run the guardrail input processor
+CMD ["python", "-m", "src.guardrail_input_processor"]

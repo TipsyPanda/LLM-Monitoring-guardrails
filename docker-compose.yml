@@ -54,6 +54,41 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
 
+  guardrails-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile.guardrails
+      args:
+        - GUARDRAILS_TOKEN=${GUARDRAILS_TOKEN}
+    depends_on:
+      - kafka
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_INPUT_TOPIC=llm.conversations
+      - KAFKA_OUTPUT_TOPIC=guardrail.violations
+      - KAFKA_INPUT_CONSUMER_GROUP=guardrail-input-processor-group
+      - TOXICITY_THRESHOLD=0.5
+      - KAFKA_INPUT_OUTPUT_FILE=/app/outputs/kafka_violations.jsonl
+    volumes:
+      - ./outputs:/app/outputs
+    restart: on-failure
+
+  alert-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.alert-consumer
+    depends_on:
+      - kafka
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=guardrail.violations
+      - ALERT_CONSUMER_GROUP=alert-consumer-group
+      - ALERT_WINDOW_SIZE_SECONDS=300
+      - ALERT_OUTPUT_FILE=/app/outputs/alerts.jsonl
+    volumes:
+      - ./outputs:/app/outputs
+    restart: on-failure
+
 volumes:
   zookeeper-data:
   zookeeper-logs:
