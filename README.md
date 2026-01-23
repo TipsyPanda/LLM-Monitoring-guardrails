@@ -230,7 +230,8 @@ source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
 
 # Ingest LMSYS dataset to Kafka
-python prepare_lmsys_dataset.py --kafka --sample-size 1000
+python -m src.prepare_lmsys_dataset --kafka --sample-size 1000
+python -m src.prepare_lmsys_dataset --kafka 
 
 # Or use mock producer
 python scripts/mock_conversation_producer.py --mode random --interval 2

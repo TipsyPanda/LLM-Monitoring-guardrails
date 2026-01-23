@@ -18,6 +18,8 @@ import os
 import json
 from pathlib import Path
 from loguru import logger
+from dotenv import load_dotenv          # <--- Add this
+from huggingface_hub import login       # <--- Add this
 
 try:
     from datasets import load_dataset
@@ -246,6 +248,19 @@ def analyze_dataset(df):
 
 
 def main():
+    
+    # Load environment variables from .env file
+    load_dotenv()
+    
+    # Get token and login
+    hf_token = os.getenv('HF_TOKEN')
+    if hf_token:
+        print(f"Logging in to Hugging Face...")
+        login(token=hf_token)
+    else:
+        logger.warning("HF_TOKEN not found in .env file. Downloading might fail for gated datasets.")
+    # ----------------------
+
     parser = argparse.ArgumentParser(
         description='Prepare LMSYS dataset for LLM monitoring'
     )
@@ -283,6 +298,7 @@ def main():
     )
 
     args = parser.parse_args()
+
 
     # Default to Kafka if neither --kafka nor --csv is specified
     if not args.kafka and not args.csv and not args.analyze_only:
