@@ -166,9 +166,6 @@ You should see violations appearing within seconds!
 - **Monitoring Dashboard**: Live Streamlit visualization
 - **Dockerized**: One command to start everything
 
-> **Version 3.0** - Complete rewrite with improved configuration, better error handling, and comprehensive documentation.
->
-> Based on the original project by [TipsyPanda](https://github.com/TipsyPanda/LLM-Monitoring-guardrails)
 
 ---
 
@@ -1488,11 +1485,3 @@ Apache License 2.0
 
 ---
 
-## Author
-
-**gez2code**  
-GitHub: [github.com/gez2code/LLM-Guardrails-Monitoring-3.0](https://github.com/gez2code/LLM-Guardrails-Monitoring-3.0)
-
-### Credits
-
-Based on the original project by **TipsyPanda**: [github.com/TipsyPanda/LLM-Monitoring-guardrails](https://github.com/TipsyPanda/LLM-Monitoring-guardrails)
