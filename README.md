@@ -35,41 +35,51 @@ User Message → Kafka → Toxicity Analysis → Violation Detection → Alert D
 - **Docker Desktop** - [Download for Windows](https://docs.docker.com/desktop/install/windows-install/) | [Download for Mac](https://docs.docker.com/desktop/install/mac-install/)
 - **Python 3.10+**
 - **Guardrails Token** (free) - [Get one here](https://hub.guardrailsai.com/)
+- **HuggingFace Token** (optional) - [Get one here](https://huggingface.co/settings/tokens) - Only needed for LMSYS dataset
 
 ### Step 1: Clone & Configure
 
-```bash
-# Clone repository
-git clone https://github.com/gez2code/LLM-Guardrails-Monitoring-3.0.git
-cd LLM-Guardrails-Monitoring-3.0
-```
+**Clone repository:**
+
+| OS | Command |
+|----|---------|
+| **Windows & Mac** | `git clone https://github.com/gez2code/LLM-Guardrails-Monitoring-3.0.git` |
+| **Windows & Mac** | `cd LLM-Guardrails-Monitoring-3.0` |
 
 **Create environment file:**
 
 | OS | Command |
 |----|---------|
-| **Windows (PowerShell)** | `copy .env.example .env` |
-| **Windows (CMD)** | `copy .env.example .env` |
+| **Windows (PowerShell/CMD)** | `copy .env.example .env` |
 | **Mac / Linux** | `cp .env.example .env` |
 
-**Edit `.env`** and add your Guardrails token:
+**Edit `.env`** and add your tokens:
+
 ```env
-GUARDRAILS_TOKEN=your_token_here
+# Required
+GUARDRAILS_TOKEN=your_guardrails_token_here
+
+# Optional (only for HuggingFace dataset)
+HF_TOKEN=your_huggingface_token_here
 ```
 
 ### Step 2: Start Services
 
-```bash
-# Start all containers (first run takes ~10 minutes to build)
-docker compose up --build -d
+| OS | Command |
+|----|---------|
+| **Windows & Mac** | `docker compose up --build -d` |
 
-# Wait for healthy status
-docker compose ps
-```
+First build takes ~10 minutes (downloads ML models).
+
+**Verify all containers are running:**
+
+| OS | Command |
+|----|---------|
+| **Windows & Mac** | `docker compose ps` |
 
 All containers should show "running" or "healthy".
 
-### Step 3: Ingest Sample Data
+### Step 3: Setup Python Environment
 
 **Create virtual environment:**
 
@@ -86,25 +96,63 @@ All containers should show "running" or "healthy".
 | **Windows (CMD)** | `venv\Scripts\activate.bat` |
 | **Mac / Linux** | `source venv/bin/activate` |
 
-**Install dependencies and run:**
+**Install dependencies:**
 
-```bash
-pip install -r requirements.txt
+| OS | Command |
+|----|---------|
+| **Windows & Mac** | `pip install -r requirements.txt` |
 
-# Ingest sample data (28 messages included)
-python scripts/fast_ingest_lmsys.py --csv-path data/raw/conversations.csv
-```
+### Step 4: Ingest Data
 
-### Step 4: Open Dashboard
+Choose **ONE** of the following options:
 
-🎉 **Open http://localhost:8501** - You should see violations appearing!
+#### Option A: CSV Sample Data (Quick Test)
+
+Uses included sample file with 28 messages. No additional setup needed.
+
+| OS | Command |
+|----|---------|
+| **Windows** | `python scripts/fast_ingest_lmsys.py --csv-path data/raw/conversations.csv` |
+| **Mac / Linux** | `python3 scripts/fast_ingest_lmsys.py --csv-path data/raw/conversations.csv` |
+
+#### Option B: HuggingFace Dataset (More Data)
+
+Loads real conversations from LMSYS-Chat-1M dataset.
+
+**Prerequisites:**
+1. Add `HF_TOKEN` to your `.env` file
+2. Request dataset access at [huggingface.co/datasets/lmsys/lmsys-chat-1m](https://huggingface.co/datasets/lmsys/lmsys-chat-1m)
+3. Wait for approval (can take minutes to days)
+
+| OS | Command |
+|----|---------|
+| **Windows** | `python scripts/hf_ingest_lmsys.py --limit 100` |
+| **Mac / Linux** | `python3 scripts/hf_ingest_lmsys.py --limit 100` |
+
+**Parameters:**
+- `--limit 100` = Load 100 conversations
+- `--limit 1000` = Load 1000 conversations
+- `--user-only` = Only analyze user messages (skip assistant responses)
+
+### Step 5: Open Dashboard
+
+🎉 **Open http://localhost:8501 in your browser**
+
+You should see violations appearing within seconds!
 
 ### Quick Links
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| **Dashboard** | http://localhost:8501 | Monitoring UI |
-| **Kafka UI** | http://localhost:8080 | Message inspection |
+| **Dashboard** | http://localhost:8501 | Real-time monitoring UI |
+| **Kafka UI** | http://localhost:8080 | Message inspection & debugging |
+
+### Stop Services
+
+| OS | Command | Description |
+|----|---------|-------------|
+| **Windows & Mac** | `docker compose down` | Stop containers (keep data) |
+| **Windows & Mac** | `docker compose down -v` | Stop and remove all data |
 
 ---
 
