@@ -30,7 +30,7 @@ class GuardrailInputProcessor:
             enabled=True,
         )
 
-        # 🔥 Policy + decision engine (NO detoxify threshold here)
+        # Policy + decision engine (NO detoxify threshold here)
         self.processor = GuardrailProcessor()
 
         # Kafka producer (output)
@@ -89,7 +89,7 @@ class GuardrailInputProcessor:
         """
         self.stats["conversations_processed"] += 1
 
-        # 🔥 Policy decision happens here
+        # Policy decision happens here
         violation = self.processor.process_conversation(conversation)
 
         if violation is None:

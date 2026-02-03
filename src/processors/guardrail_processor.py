@@ -74,20 +74,20 @@ class GuardrailProcessor:
         self, conversation: Conversation
     ) -> Optional[Violation]:
 
-        # 1️⃣ Detoxify signal (0–1 per label)
+        # 1 Detoxify signal (0–1 per label)
         scores = self.detoxify_model.predict(conversation.text)
 
-        # 2️⃣ Core policy signal (weighted MAX)
+        # 2 Core policy signal (weighted MAX)
         weighted_score = self._compute_weighted_max_score(scores)
 
-        # 3️⃣ Binary violation gate
+        # 3 Binary violation gate
         if weighted_score < self.VIOLATION_THRESHOLD:
             return None
 
-        # 4️⃣ Severity classification
+        # 4 Severity classification
         severity = self._bucket_from_score(weighted_score)
 
-        # 5️⃣ Guardrails enforcement ONLY for HIGH
+        # 5 Guardrails enforcement ONLY for HIGH
         if severity == SeverityLevel.HIGH:
             try:
                 self.guard.validate(conversation.text)
@@ -109,7 +109,7 @@ class GuardrailProcessor:
             ingested_at=datetime.now(timezone.utc),
             original_text=conversation.text,
 
-            # 🔥 CORE SIGNAL
+            # CORE SIGNAL
             weighted_score=float(weighted_score),
 
             severity=severity,
