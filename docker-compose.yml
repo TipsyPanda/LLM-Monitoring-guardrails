@@ -64,7 +64,6 @@ services:
       dockerfile: Dockerfile.guardrails
       args:
         - GUARDRAILS_TOKEN=${GUARDRAILS_TOKEN}
-    container_name: llm-guardrails-processor
     depends_on:
       kafka:
         condition: service_healthy

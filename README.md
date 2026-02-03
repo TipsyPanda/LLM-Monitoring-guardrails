@@ -65,9 +65,19 @@ HF_TOKEN=your_huggingface_token_here
 
 ### Step 2: Start Services
 
+**Start with single processor instance:**
+
 | OS | Command |
 |----|---------|
 | **Windows & Mac** | `docker compose up --build -d` |
+| **Linux** | `sudo docker compose up --build -d` |
+
+**Start with 3 processor instances (recommended for production):**
+
+| OS | Command |
+|----|---------|
+| **Windows & Mac** | `docker compose up --build -d --scale guardrails-processor=3` |
+| **Linux** | `sudo docker compose up --build -d --scale guardrails-processor=3` |
 
 First build takes ~10 minutes (downloads ML models).
 
@@ -76,6 +86,7 @@ First build takes ~10 minutes (downloads ML models).
 | OS | Command |
 |----|---------|
 | **Windows & Mac** | `docker compose ps` |
+| **Linux** | `sudo docker compose ps` |
 
 All containers should show "running" or "healthy".
 
@@ -710,13 +721,37 @@ The architecture supports horizontal scaling for high-throughput scenarios:
 └─────────────────────────────────────────────────────────────────────────┘
 
 Scale command:
-docker compose up --scale guardrails-processor=3 -d
+docker compose up -d --scale guardrails-processor=3
 ```
 
 **Scaling Considerations:**
-- **Partitions = Max Parallelism**: One partition can only be consumed by one processor
+- **Partitions = Max Parallelism**: One partition can only be consumed by one processor (10 partitions configured by default)
 - **State Management**: Alert Consumer should remain single instance (maintains window state)
 - **Resource Limits**: Each processor loads the Detoxify model (~400MB memory)
+
+**Monitoring Scaled Instances:**
+```bash
+# View all running containers
+docker compose ps
+
+# View logs from all processor instances (combined)
+docker compose logs -f guardrails-processor
+
+# View logs from specific processor instance
+docker compose logs -f llm-monitoring-guardrails-main-guardrails-processor-1
+docker compose logs -f llm-monitoring-guardrails-main-guardrails-processor-2
+docker compose logs -f llm-monitoring-guardrails-main-guardrails-processor-3
+
+# View logs from other services (by service name)
+docker compose logs -f alert-consumer
+docker compose logs -f dashboard
+docker compose logs -f kafka
+
+# Or by container name (using docker logs)
+docker logs -f llm-guardrails-alert-consumer
+docker logs -f llm-guardrails-dashboard
+docker logs -f llm-guardrails-kafka
+```
 
 ### Message Formats
 
@@ -869,16 +904,46 @@ Edit `.env` to customize:
 ## Common Commands
 
 ```bash
-# Start services
+# Start services (single instance)
 docker compose up -d
+
+# Start services with 3 guardrails processors (scaled)
+docker compose up -d --scale guardrails-processor=3
 
 # Start with rebuild (after code changes)
 docker compose up --build -d
 
-# View logs
+# Start with rebuild and scaling
+docker compose up --build -d --scale guardrails-processor=3
+
+# View all containers and their status
+docker compose ps
+
+# View logs (all services)
+docker compose logs -f
+
+# View logs (specific service)
 docker compose logs -f guardrails-processor
 docker compose logs -f alert-consumer
 docker compose logs -f dashboard
+docker compose logs -f kafka
+
+# View logs of individual scaled containers (guardrails-processor)
+docker compose logs -f llm-monitoring-guardrails-main-guardrails-processor-1
+docker compose logs -f llm-monitoring-guardrails-main-guardrails-processor-2
+docker compose logs -f llm-monitoring-guardrails-main-guardrails-processor-3
+
+# View logs by specific container name (alternative method)
+docker logs -f llm-guardrails-dashboard
+docker logs -f llm-guardrails-alert-consumer
+docker logs -f llm-guardrails-kafka
+docker logs -f llm-guardrails-kafka-ui
+docker logs -f llm-guardrails-zookeeper
+
+# View last 50 lines of logs
+docker compose logs --tail 50 guardrails-processor
+docker compose logs --tail 50 dashboard
+docker compose logs --tail 50 alert-consumer
 
 # Stop services
 docker compose down
@@ -888,6 +953,10 @@ docker compose down -v
 
 # Restart a specific service
 docker compose restart dashboard
+
+# Scale up/down while running
+docker compose up -d --scale guardrails-processor=5
+docker compose up -d --scale guardrails-processor=1
 ```
 
 ---
