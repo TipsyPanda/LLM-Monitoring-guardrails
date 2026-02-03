@@ -1,49 +1,37 @@
+# Git
+.git
+.gitignore
+
 # Python
-venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+__pycache__
+*.py[cod]
+*$py.class
 *.so
-*.egg
+.Python
+venv/
+ENV/
+.venv
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build
 *.egg-info/
 dist/
 build/
 
-# Git
-.git/
-.gitignore
-
-# Environment
+# Local files
 .env
-.env.local
+*.log
+outputs/*.jsonl
 
-# Data and outputs
-outputs/
-data/
-*.csv
-*.jsonl
+# Docker
+Dockerfile*
+docker-compose*.yml
 
-# Documentation
+# Docs
 *.md
-README.md
-docs/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Plans
-.claude/
+LICENSE

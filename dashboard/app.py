@@ -1,17 +1,19 @@
 """
 LLM Monitoring Dashboard - Main Application
-
-Streamlit-based dashboard for visualizing violations, alerts, and toxicity metrics.
-
-Usage:
-    streamlit run dashboard/app.py
 """
+
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 import streamlit as st
 import time
 from datetime import datetime
 
-from dashboard.config import config
+from dashboard import config
 from dashboard.data.loader import DataLoader
 from dashboard.data.processor import DataProcessor
 from dashboard.components.metrics import render_metric_cards, render_alert_metrics
@@ -24,6 +26,7 @@ from dashboard.components.charts import (
     render_score_heatmap
 )
 from dashboard.components.tables import render_violations_table, render_alerts_table
+
 
 
 # Page configuration

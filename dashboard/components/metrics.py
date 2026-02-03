@@ -1,123 +1,129 @@
-"""KPI metric cards component"""
+"""KPI metric cards component (policy-aligned)"""
 
 import streamlit as st
 import pandas as pd
 from typing import Optional
 
-from dashboard.data.processor import DataProcessor
 
+# ==========================================================
+# TOP-LEVEL KPIs
+# ==========================================================
 
 def render_metric_cards(
     violations_df: pd.DataFrame,
     alerts_df: pd.DataFrame,
-    previous_violations_df: Optional[pd.DataFrame] = None
 ):
     """
-    Render top-level KPI metric cards
-
-    Args:
-        violations_df: Current violations DataFrame
-        alerts_df: Current alerts DataFrame
-        previous_violations_df: Previous period violations for delta calculation
+    Render top-level KPI metric cards.
+    Focus: policy effectiveness & signal strength.
     """
+
     col1, col2, col3, col4, col5 = st.columns(5)
 
-    # Total Violations
     total_violations = len(violations_df)
-    delta_violations = None
-    if previous_violations_df is not None:
-        delta_violations = total_violations - len(previous_violations_df)
+    total_alerts = len(alerts_df)
+
+    # ------------------------------------------------------
+    # Violation Rate
+    # ------------------------------------------------------
+    violation_rate = None
+    if not violations_df.empty:
+        violation_rate = total_violations
 
     with col1:
         st.metric(
-            label="Total Violations",
+            label="Violations",
             value=total_violations,
-            delta=delta_violations
         )
 
-    # Total Alerts
-    total_alerts = len(alerts_df)
+    # ------------------------------------------------------
+    # Alerts
+    # ------------------------------------------------------
     with col2:
         st.metric(
-            label="Total Alerts",
-            value=total_alerts
+            label="Alerts",
+            value=total_alerts,
         )
 
-    # High Severity Violations
-    high_severity = 0
-    if not violations_df.empty and 'severity' in violations_df.columns:
-        high_severity = len(violations_df[violations_df['severity'] == 'high'])
+    # ------------------------------------------------------
+    # Escalation Rate
+    # ------------------------------------------------------
+    escalation_rate = 0.0
+    if total_violations > 0:
+        escalation_rate = total_alerts / total_violations
 
     with col3:
         st.metric(
-            label="High Severity",
-            value=high_severity,
-            delta=None,
-            delta_color="inverse"
+            label="Escalation Rate",
+            value=f"{escalation_rate:.1%}",
         )
 
-    # Medium Severity Violations
-    medium_severity = 0
-    if not violations_df.empty and 'severity' in violations_df.columns:
-        medium_severity = len(violations_df[violations_df['severity'] == 'medium'])
+    # ------------------------------------------------------
+    # Mean weighted_score (message-level)
+    # ------------------------------------------------------
+    mean_weighted = 0.0
+    if not violations_df.empty and "weighted_score" in violations_df.columns:
+        mean_weighted = violations_df["weighted_score"].mean()
 
     with col4:
         st.metric(
-            label="Medium Severity",
-            value=medium_severity
+            label="Mean Weighted Score",
+            value=f"{mean_weighted:.3f}",
         )
 
-    # Low Severity Violations
-    low_severity = 0
-    if not violations_df.empty and 'severity' in violations_df.columns:
-        low_severity = len(violations_df[violations_df['severity'] == 'low'])
+    # ------------------------------------------------------
+    # Mean window_score (alert-level)
+    # ------------------------------------------------------
+    mean_window = 0.0
+    if not alerts_df.empty and "window_score" in alerts_df.columns:
+        mean_window = alerts_df["window_score"].mean()
 
     with col5:
         st.metric(
-            label="Low Severity",
-            value=low_severity
+            label="Mean Window Score",
+            value=f"{mean_window:.3f}",
         )
+
+
+# ==========================================================
+# SEVERITY / DANGER BREAKDOWN
+# ==========================================================
+
+def render_severity_metrics(violations_df: pd.DataFrame):
+    """
+    Render severity distribution metrics (message-level).
+    """
+    col1, col2, col3 = st.columns(3)
+
+    high = len(violations_df[violations_df["severity"] == "high"]) if "severity" in violations_df.columns else 0
+    medium = len(violations_df[violations_df["severity"] == "medium"]) if "severity" in violations_df.columns else 0
+    low = len(violations_df[violations_df["severity"] == "low"]) if "severity" in violations_df.columns else 0
+
+    with col1:
+        st.metric("High Severity", high, delta_color="inverse")
+
+    with col2:
+        st.metric("Medium Severity", medium)
+
+    with col3:
+        st.metric("Low Severity", low)
 
 
 def render_alert_metrics(alerts_df: pd.DataFrame):
     """
-    Render alert-specific metrics
-
-    Args:
-        alerts_df: Alerts DataFrame
+    Render alert danger-level metrics (window-level).
     """
     col1, col2, col3 = st.columns(3)
 
-    # High Danger Alerts
-    high_danger = 0
-    if not alerts_df.empty and 'danger_level' in alerts_df.columns:
-        high_danger = len(alerts_df[alerts_df['danger_level'] == 'high'])
+    high = len(alerts_df[alerts_df["danger_level"] == "high"]) if "danger_level" in alerts_df.columns else 0
+    medium = len(alerts_df[alerts_df["danger_level"] == "medium"]) if "danger_level" in alerts_df.columns else 0
+    low = len(alerts_df[alerts_df["danger_level"] == "low"]) if "danger_level" in alerts_df.columns else 0
 
     with col1:
-        st.metric(
-            label="High Danger Alerts",
-            value=high_danger,
-            delta_color="inverse"
-        )
-
-    # Medium Danger Alerts
-    medium_danger = 0
-    if not alerts_df.empty and 'danger_level' in alerts_df.columns:
-        medium_danger = len(alerts_df[alerts_df['danger_level'] == 'medium'])
+        st.metric("High Danger Alerts", high, delta_color="inverse")
 
     with col2:
-        st.metric(
-            label="Medium Danger",
-            value=medium_danger
-        )
-
-    # Low Danger Alerts
-    low_danger = 0
-    if not alerts_df.empty and 'danger_level' in alerts_df.columns:
-        low_danger = len(alerts_df[alerts_df['danger_level'] == 'low'])
+        st.metric("Medium Danger Alerts", medium)
 
     with col3:
-        st.metric(
-            label="Low Danger",
-            value=low_danger
-        )
+        st.metric("Low Danger Alerts", low)

@@ -10,48 +10,51 @@ services:
     volumes:
       - zookeeper-data:/var/lib/zookeeper/data
       - zookeeper-logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: llm-guardrails-kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
-      - "9101:9101"
     environment:
       KAFKA_NUM_PARTITIONS: 10
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      # 1. Map the protocols
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
-      # 2. Tell the world: "If you are outside, use localhost:9092. If you are in Docker, use kafka:29092"
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
-      # 3. Listen on both ports
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,INTERNAL://0.0.0.0:29092
-      # 4. Use internal network for broker comms
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_JMX_PORT: 9101
-      KAFKA_JMX_HOSTNAME: localhost
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
     volumes:
       - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: llm-guardrails-kafka-ui
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
-      # CRITICAL CHANGE: Connect to the INTERNAL port (29092)
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
 
@@ -61,14 +64,15 @@ services:
       dockerfile: Dockerfile.guardrails
       args:
         - GUARDRAILS_TOKEN=${GUARDRAILS_TOKEN}
+    container_name: llm-guardrails-processor
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - KAFKA_INPUT_TOPIC=llm.conversations
       - KAFKA_OUTPUT_TOPIC=guardrail.violations
       - KAFKA_INPUT_CONSUMER_GROUP=guardrail-input-processor-group
-      - TOXICITY_THRESHOLD=0.5
       - KAFKA_INPUT_OUTPUT_FILE=/app/outputs/kafka_violations.jsonl
     volumes:
       - ./outputs:/app/outputs
@@ -78,14 +82,36 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.alert-consumer
+    container_name: llm-guardrails-alert-consumer
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - KAFKA_TOPIC=guardrail.violations
       - ALERT_CONSUMER_GROUP=alert-consumer-group
       - ALERT_WINDOW_SIZE_SECONDS=300
+      - ALERT_LOW_THRESHOLD=0.15
+      - ALERT_MEDIUM_THRESHOLD=0.40
+      - ALERT_HIGH_THRESHOLD=0.80
       - ALERT_OUTPUT_FILE=/app/outputs/alerts.jsonl
+    volumes:
+      - ./outputs:/app/outputs
+    restart: on-failure
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: llm-guardrails-dashboard
+    depends_on:
+      - guardrails-processor
+      - alert-consumer
+    ports:
+      - "8501:8501"
+    environment:
+      - VIOLATIONS_FILE=/app/outputs/kafka_violations.jsonl
+      - ALERTS_FILE=/app/outputs/alerts.jsonl
     volumes:
       - ./outputs:/app/outputs
     restart: on-failure

@@ -31,7 +31,7 @@ class FastLMSYSIngester:
         """
         Initialize the fast ingester
 
-        Args:
+        Args:a
             bootstrap_servers: Kafka bootstrap servers
             topic: Topic to produce conversations to
         """
@@ -41,7 +41,7 @@ class FastLMSYSIngester:
             acks='all',
             batch_size=16384,  # Larger batch for faster throughput
             linger_ms=10,  # Small linger for batching
-            compression_type='lz4',  # Compression for better performance
+            compression_type=None,  # Compression for better performance
             value_serializer=lambda v: json.dumps(v).encode('utf-8')
         )
         self.sent_count = 0
@@ -144,9 +144,10 @@ def main():
         description='Fast ingestion of LMSYS dataset into Kafka'
     )
     parser.add_argument(
-        '--csv-path', type=str, required=True,
-        help='Path to LMSYS CSV file'
-    )
+    '--csv-path', type=str, 
+    default='data/raw/conversations.csv',  # <-- Default value
+    help='Path to LMSYS CSV file'
+)
     parser.add_argument(
         '--user-only', action='store_true',
         help='Only ingest user messages (skip agent responses)'
@@ -164,8 +165,8 @@ def main():
 
     # Load config
     config = KafkaInputConfig()
-    bootstrap_servers = args.bootstrap_servers or config.KAFKA_BOOTSTRAP_SERVERS
-    topic = args.topic or config.KAFKA_INPUT_TOPIC
+    bootstrap_servers = args.bootstrap_servers or config.BOOTSTRAP_SERVERS
+    topic = args.topic or config.INPUT_TOPIC
 
     # Create ingester
     ingester = FastLMSYSIngester(

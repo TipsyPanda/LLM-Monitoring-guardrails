@@ -3,6 +3,8 @@ from kafka import KafkaProducer
 from kafka.errors import KafkaError
 from loguru import logger
 from src.models.violation import Violation
+from datetime import datetime, timezone
+
 
 
 class ViolationProducer:
@@ -58,6 +60,10 @@ class ViolationProducer:
         try:
             # Convert violation to dict for serialization
             violation_dict = violation.to_dict()
+
+            violation_dict["ingestion_timestamp"] = (
+                datetime.now(timezone.utc).isoformat()
+            )
 
             # Send to Kafka with conversation_id as key for partitioning
             future = self.producer.send(

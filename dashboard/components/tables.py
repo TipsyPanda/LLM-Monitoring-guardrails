@@ -4,9 +4,13 @@ import streamlit as st
 import pandas as pd
 from typing import Optional
 
-from dashboard.config import config
+from dashboard import config
 from dashboard.data.processor import DataProcessor
 
+
+# ------------------------------------------------------------------
+# Violations Table
+# ------------------------------------------------------------------
 
 def render_violations_table(
     df: pd.DataFrame,
@@ -14,12 +18,7 @@ def render_violations_table(
     title: str = "Recent Violations"
 ):
     """
-    Render interactive violations table
-
-    Args:
-        df: Violations DataFrame
-        page_size: Number of rows per page
-        title: Table title
+    Render interactive violations table with policy transparency
     """
     st.subheader(title)
 
@@ -27,21 +26,21 @@ def render_violations_table(
         st.info("No violations to display")
         return
 
-    # Prepare display DataFrame
     display_df = df.copy()
 
-    # Sort by timestamp descending
-    if 'timestamp' in display_df.columns:
-        display_df = display_df.sort_values('timestamp', ascending=False)
+    # Sort newest first
+    if "timestamp" in display_df.columns:
+        display_df = display_df.sort_values("timestamp", ascending=False)
 
-    # Create display columns
-    display_data = []
+    rows = []
     for _, row in display_df.iterrows():
-        # Get top score
-        top_score = DataProcessor.get_top_score(row.get('metadata', {}))
+        ts = (
+            row["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            if pd.notna(row.get("timestamp"))
+            else ""
+        )
 
-        # Format labels
-        labels = row.get('toxicity_labels', [])
+        labels = row.get("toxicity_labels", [])
         if isinstance(labels, list):
             labels_str = ", ".join(labels[:3])
             if len(labels) > 3:
@@ -49,59 +48,32 @@ def render_violations_table(
         else:
             labels_str = str(labels)
 
-        display_data.append({
-            'Timestamp': row.get('timestamp', '').strftime('%Y-%m-%d %H:%M:%S') if pd.notna(row.get('timestamp')) else '',
-            'Conversation': row.get('conversation_id', '')[:15],
-            'Text': DataProcessor.truncate_text(row.get('original_text', ''), config.MAX_TEXT_LENGTH),
-            'Severity': row.get('severity', '').upper(),
-            'Labels': labels_str,
-            'Top Score': f"{top_score:.2f}"
+        rows.append({
+            "Timestamp": ts,
+            "Conversation": str(row.get("conversation_id", ""))[:15],
+            "Text": DataProcessor.truncate_text(
+                row.get("original_text", ""),
+                config.MAX_TEXT_LENGTH
+            ),
+            "Severity": str(row.get("severity", "")).upper(),
+            "Weighted Score": f"{row.get('weighted_score', 0.0):.3f}",
+            "Labels": labels_str,
         })
 
-    display_df = pd.DataFrame(display_data)
+    table_df = pd.DataFrame(rows)
 
-    # Pagination
-    total_rows = len(display_df)
-    total_pages = (total_rows - 1) // page_size + 1 if total_rows > 0 else 1
-
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        page = st.selectbox(
-            "Page",
-            options=range(1, total_pages + 1),
-            format_func=lambda x: f"Page {x} of {total_pages}",
-            key="violations_page"
-        )
-
-    # Get page data
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    page_df = display_df.iloc[start_idx:end_idx]
-
-    # Style the dataframe
-    def style_severity(val):
-        if val == 'HIGH':
-            return f'background-color: {config.SEVERITY_COLORS["high"]}; color: white'
-        elif val == 'MEDIUM':
-            return f'background-color: {config.SEVERITY_COLORS["medium"]}; color: white'
-        elif val == 'LOW':
-            return f'background-color: {config.SEVERITY_COLORS["low"]}; color: white'
-        return ''
-
-    styled_df = page_df.style.applymap(
-        style_severity,
-        subset=['Severity']
+    _render_paginated_table(
+        table_df,
+        page_size=page_size,
+        severity_column="Severity",
+        color_map=config.SEVERITY_COLORS,
+        key_prefix="violations"
     )
 
-    st.dataframe(
-        styled_df,
-        use_container_width=True,
-        hide_index=True
-    )
 
-    # Show record count
-    st.caption(f"Showing {start_idx + 1}-{min(end_idx, total_rows)} of {total_rows} violations")
-
+# ------------------------------------------------------------------
+# Alerts Table
+# ------------------------------------------------------------------
 
 def render_alerts_table(
     df: pd.DataFrame,
@@ -109,12 +81,7 @@ def render_alerts_table(
     title: str = "Recent Alerts"
 ):
     """
-    Render interactive alerts table
-
-    Args:
-        df: Alerts DataFrame
-        page_size: Number of rows per page
-        title: Table title
+    Render interactive alerts table with full policy explainability
     """
     st.subheader(title)
 
@@ -122,39 +89,58 @@ def render_alerts_table(
         st.info("No alerts to display")
         return
 
-    # Prepare display DataFrame
     display_df = df.copy()
 
-    # Sort by timestamp descending
-    if 'timestamp' in display_df.columns:
-        display_df = display_df.sort_values('timestamp', ascending=False)
+    if "timestamp" in display_df.columns:
+        display_df = display_df.sort_values("timestamp", ascending=False)
 
-    # Create display columns
-    display_data = []
+    rows = []
     for _, row in display_df.iterrows():
-        # Get summary info
-        summary = row.get('summary', {})
-        if isinstance(summary, dict):
-            labels = summary.get('labels', [])
-            labels_str = ", ".join(labels[:3]) if labels else ""
-        else:
-            labels_str = ""
+        ts = (
+            row["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            if pd.notna(row.get("timestamp"))
+            else ""
+        )
 
-        display_data.append({
-            'Timestamp': row.get('timestamp', '').strftime('%Y-%m-%d %H:%M:%S') if pd.notna(row.get('timestamp')) else '',
-            'Alert ID': str(row.get('alert_id', ''))[:12],
-            'Conversation': row.get('conversation_id', '')[:15],
-            'Danger Level': row.get('danger_level', '').upper(),
-            'Violations': row.get('violation_count', 0),
-            'Window': f"{row.get('window_size_minutes', 5)} min",
-            'Labels': labels_str
+        summary = row.get("summary", {})
+        labels = summary.get("labels", []) if isinstance(summary, dict) else []
+        labels_str = ", ".join(labels[:3]) if labels else ""
+
+        rows.append({
+            "Timestamp": ts,
+            "Alert ID": str(row.get("alert_id", ""))[:12],
+            "Conversation": str(row.get("conversation_id", ""))[:15],
+            "Danger Level": str(row.get("danger_level", "")).upper(),
+            "Window Score": f"{row.get('window_score', 0.0):.3f}",
+            "Violations": row.get("violation_count", 0),
+            "Window": f"{row.get('window_size_minutes', 5)} min",
+            "Labels": labels_str,
         })
 
-    display_df = pd.DataFrame(display_data)
+    table_df = pd.DataFrame(rows)
 
-    # Pagination
-    total_rows = len(display_df)
-    total_pages = (total_rows - 1) // page_size + 1 if total_rows > 0 else 1
+    _render_paginated_table(
+        table_df,
+        page_size=page_size,
+        severity_column="Danger Level",
+        color_map=config.DANGER_COLORS,
+        key_prefix="alerts"
+    )
+
+
+# ------------------------------------------------------------------
+# Shared pagination + styling
+# ------------------------------------------------------------------
+
+def _render_paginated_table(
+    df: pd.DataFrame,
+    page_size: int,
+    severity_column: str,
+    color_map: dict,
+    key_prefix: str
+):
+    total_rows = len(df)
+    total_pages = max(1, (total_rows - 1) // page_size + 1)
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -162,33 +148,30 @@ def render_alerts_table(
             "Page",
             options=range(1, total_pages + 1),
             format_func=lambda x: f"Page {x} of {total_pages}",
-            key="alerts_page"
+            key=f"{key_prefix}_page"
         )
 
-    # Get page data
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    page_df = display_df.iloc[start_idx:end_idx]
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_df = df.iloc[start:end]
 
-    # Style the dataframe
-    def style_danger(val):
-        if val == 'HIGH':
-            return f'background-color: {config.DANGER_COLORS["high"]}; color: white'
-        elif val == 'MEDIUM':
-            return f'background-color: {config.DANGER_COLORS["medium"]}; color: white'
-        elif val == 'LOW':
-            return f'background-color: {config.DANGER_COLORS["low"]}; color: white'
-        return ''
+    def style_severity(val):
+        val = str(val).lower()
+        if val in color_map:
+            return f"background-color: {color_map[val]}; color: white"
+        return ""
 
-    styled_df = page_df.style.applymap(
-        style_danger,
-        subset=['Danger Level']
+    styled = page_df.style.applymap(
+        style_severity,
+        subset=[severity_column]
     )
 
     st.dataframe(
-        styled_df,
+        styled,
         use_container_width=True,
         hide_index=True
     )
 
-    st.caption(f"Showing {start_idx + 1}-{min(end_idx, total_rows)} of {total_rows} alerts")
+    st.caption(
+        f"Showing {start + 1}-{min(end, total_rows)} of {total_rows}"
+    )

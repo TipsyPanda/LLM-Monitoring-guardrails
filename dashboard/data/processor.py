@@ -4,11 +4,25 @@ import pandas as pd
 from typing import Dict, List, Optional
 from datetime import datetime
 
-from dashboard.config import config
+from dashboard import config
 
 
 class DataProcessor:
-    """Transform and aggregate data for visualization"""
+    """
+    Transform and aggregate data for visualization (policy-aware).
+
+    Design principles:
+    - ingestion_time is the SINGLE source of truth for time
+    - all public methods are UTC-safe and idempotent
+    - no hidden assumptions about call order
+    """
+
+    # 🔥 SINGLE SOURCE OF TRUTH FOR TIME AXIS
+    TIME_COLUMN = "ingested_at"
+
+    # ------------------------------------------------------------------
+    # Core filtering
+    # ------------------------------------------------------------------
 
     @staticmethod
     def filter_data(
@@ -16,109 +30,151 @@ class DataProcessor:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         severities: Optional[List[str]] = None,
+        danger_levels: Optional[List[str]] = None,
         labels: Optional[List[str]] = None,
         conversation_id: Optional[str] = None,
-        min_score: float = 0.0,
-        **kwargs
+        min_weighted_score: float = 0.0,
+        **_,
     ) -> pd.DataFrame:
         """
-        Apply filters to violations DataFrame
-
-        Args:
-            df: Input DataFrame
-            start_date: Filter start date
-            end_date: Filter end date
-            severities: List of severity levels to include
-            labels: List of toxicity labels to include
-            conversation_id: Filter by conversation ID (partial match)
-            min_score: Minimum toxicity score threshold
-
-        Returns:
-            Filtered DataFrame
+        Apply policy-aware filters to violations or alerts DataFrame.
+        Uses ingestion time as the canonical time axis.
         """
         if df.empty:
             return df
 
         filtered = df.copy()
 
-        if start_date and 'timestamp' in filtered.columns:
-            filtered = filtered[filtered['timestamp'] >= pd.to_datetime(start_date)]
+        # ------------------------------------------------------------------
+        # ⏱️ Time range (INGESTION TIME, UTC-safe)
+        # ------------------------------------------------------------------
 
-        if end_date and 'timestamp' in filtered.columns:
-            filtered = filtered[filtered['timestamp'] <= pd.to_datetime(end_date)]
+        if DataProcessor.TIME_COLUMN in filtered.columns:
+            filtered[DataProcessor.TIME_COLUMN] = pd.to_datetime(
+                filtered[DataProcessor.TIME_COLUMN],
+                utc=True,
+                errors="coerce",
+            )
 
-        if severities and 'severity' in filtered.columns:
-            filtered = filtered[filtered['severity'].isin(severities)]
+            if start_date:
+                start = pd.to_datetime(start_date, utc=True)
+                filtered = filtered[
+                    filtered[DataProcessor.TIME_COLUMN] >= start
+                ]
 
-        if labels and 'toxicity_labels' in filtered.columns:
+            if end_date:
+                end = pd.to_datetime(end_date, utc=True)
+                filtered = filtered[
+                    filtered[DataProcessor.TIME_COLUMN] <= end
+                ]
+
+        # ------------------------------------------------------------------
+        # Severity (violations)
+        # ------------------------------------------------------------------
+
+        if severities and "severity" in filtered.columns:
             filtered = filtered[
-                filtered['toxicity_labels'].apply(
-                    lambda x: any(label in x for label in labels) if isinstance(x, list) else False
+                filtered["severity"].isin(severities)
+            ]
+
+        # ------------------------------------------------------------------
+        # Danger level (alerts)
+        # ------------------------------------------------------------------
+
+        if danger_levels and "danger_level" in filtered.columns:
+            filtered = filtered[
+                filtered["danger_level"].isin(danger_levels)
+            ]
+
+        # ------------------------------------------------------------------
+        # 🔥 Weighted policy score (CORE SIGNAL)
+        # ------------------------------------------------------------------
+
+        if min_weighted_score > 0 and "weighted_score" in filtered.columns:
+            filtered = filtered[
+                filtered["weighted_score"] >= min_weighted_score
+            ]
+
+        # ------------------------------------------------------------------
+        # Toxicity labels (explanatory only)
+        # ------------------------------------------------------------------
+
+        if labels and "toxicity_labels" in filtered.columns:
+            filtered = filtered[
+                filtered["toxicity_labels"].apply(
+                    lambda xs: (
+                        isinstance(xs, list)
+                        and any(label in xs for label in labels)
+                    )
                 )
             ]
 
-        if conversation_id and 'conversation_id' in filtered.columns:
-            filtered = filtered[
-                filtered['conversation_id'].str.contains(conversation_id, case=False, na=False)
-            ]
+        # ------------------------------------------------------------------
+        # Conversation search
+        # ------------------------------------------------------------------
 
-        if min_score > 0 and 'metadata' in filtered.columns:
+        if conversation_id and "conversation_id" in filtered.columns:
             filtered = filtered[
-                filtered['metadata'].apply(
-                    lambda x: max(x.get('scores', {}).values(), default=0) >= min_score
-                    if isinstance(x, dict) else False
-                )
+                filtered["conversation_id"]
+                .astype(str)
+                .str.contains(conversation_id, case=False, na=False)
             ]
 
         return filtered
 
+    # ------------------------------------------------------------------
+    # Aggregations
+    # ------------------------------------------------------------------
+
     @staticmethod
     def aggregate_by_time(
         df: pd.DataFrame,
-        freq: str = 'H',
-        value_column: str = 'severity'
+        freq: str = "H",
+        value_column: str = "severity",
     ) -> pd.DataFrame:
         """
-        Aggregate data by time period
-
-        Args:
-            df: Input DataFrame with timestamp column
-            freq: Frequency string ('H' for hourly, 'D' for daily)
-            value_column: Column to group by (severity or danger_level)
-
-        Returns:
-            Aggregated DataFrame with period, value, and count columns
+        Aggregate events by time bucket using ingestion time.
+        Safe to call independently of filter_data().
         """
-        if df.empty or 'timestamp' not in df.columns:
-            return pd.DataFrame(columns=['period', value_column, 'count'])
+        if df.empty or DataProcessor.TIME_COLUMN not in df.columns:
+            return pd.DataFrame(columns=["period", value_column, "count"])
 
-        df_copy = df.copy()
-        df_copy['period'] = df_copy['timestamp'].dt.floor(freq)
+        df = df.copy()
 
-        if value_column in df_copy.columns:
-            agg = df_copy.groupby(['period', value_column]).size().reset_index(name='count')
-        else:
-            agg = df_copy.groupby('period').size().reset_index(name='count')
+        # 🔒 Defensive datetime normalization
+        df[DataProcessor.TIME_COLUMN] = pd.to_datetime(
+            df[DataProcessor.TIME_COLUMN],
+            utc=True,
+            errors="coerce",
+        )
 
-        return agg
+        df["period"] = df[DataProcessor.TIME_COLUMN].dt.floor(freq)
+
+        if value_column in df.columns:
+            return (
+                df.groupby(["period", value_column])
+                .size()
+                .reset_index(name="count")
+            )
+
+        return (
+            df.groupby("period")
+            .size()
+            .reset_index(name="count")
+        )
+
+    # ------------------------------------------------------------------
+    # Distributions
+    # ------------------------------------------------------------------
 
     @staticmethod
     def get_label_counts(df: pd.DataFrame) -> Dict[str, int]:
-        """
-        Count occurrences of each toxicity label
-
-        Args:
-            df: Input DataFrame with toxicity_labels column
-
-        Returns:
-            Dictionary of label counts
-        """
         counts = {label: 0 for label in config.TOXICITY_LABELS}
 
-        if df.empty or 'toxicity_labels' not in df.columns:
+        if df.empty or "toxicity_labels" not in df.columns:
             return counts
 
-        for labels in df['toxicity_labels']:
+        for labels in df["toxicity_labels"]:
             if isinstance(labels, list):
                 for label in labels:
                     if label in counts:
@@ -128,70 +184,51 @@ class DataProcessor:
 
     @staticmethod
     def get_severity_distribution(df: pd.DataFrame) -> Dict[str, int]:
-        """
-        Get count of each severity level
-
-        Args:
-            df: Input DataFrame with severity column
-
-        Returns:
-            Dictionary of severity counts
-        """
         distribution = {level: 0 for level in config.SEVERITY_LEVELS}
 
-        if df.empty or 'severity' not in df.columns:
+        if df.empty or "severity" not in df.columns:
             return distribution
 
-        counts = df['severity'].value_counts().to_dict()
-        distribution.update(counts)
-
+        distribution.update(df["severity"].value_counts().to_dict())
         return distribution
 
     @staticmethod
     def get_danger_distribution(df: pd.DataFrame) -> Dict[str, int]:
-        """
-        Get count of each danger level
-
-        Args:
-            df: Input DataFrame with danger_level column
-
-        Returns:
-            Dictionary of danger level counts
-        """
         distribution = {level: 0 for level in config.DANGER_LEVELS}
 
-        if df.empty or 'danger_level' not in df.columns:
+        if df.empty or "danger_level" not in df.columns:
             return distribution
 
-        counts = df['danger_level'].value_counts().to_dict()
-        distribution.update(counts)
-
+        distribution.update(df["danger_level"].value_counts().to_dict())
         return distribution
+
+    # ------------------------------------------------------------------
+    # Score extraction (for heatmaps only)
+    # ------------------------------------------------------------------
 
     @staticmethod
     def extract_scores(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Extract toxicity scores into flat columns
-
-        Args:
-            df: Input DataFrame with metadata column
-
-        Returns:
-            DataFrame with individual score columns
+        Flatten raw Detoxify scores for heatmap visualization only.
         """
-        if df.empty or 'metadata' not in df.columns:
+        if df.empty or "metadata" not in df.columns:
             return pd.DataFrame()
 
         records = []
+
         for _, row in df.iterrows():
-            metadata = row.get('metadata', {})
-            scores = metadata.get('scores', {}) if isinstance(metadata, dict) else {}
+            scores = (
+                row.get("metadata", {}).get("scores", {})
+                if isinstance(row.get("metadata"), dict)
+                else {}
+            )
 
             record = {
-                'conversation_id': row.get('conversation_id', ''),
-                'timestamp': row.get('timestamp'),
-                'severity': row.get('severity', ''),
+                "conversation_id": row.get("conversation_id", ""),
+                "timestamp": row.get(DataProcessor.TIME_COLUMN),
+                "severity": row.get("severity", ""),
             }
+
             for label in config.TOXICITY_LABELS:
                 record[label] = scores.get(label, 0.0)
 
@@ -199,21 +236,20 @@ class DataProcessor:
 
         return pd.DataFrame(records)
 
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
     @staticmethod
     def get_top_score(metadata: dict) -> float:
-        """Get the highest toxicity score from metadata"""
+        """Max raw Detoxify score (table-only helper)."""
         if not isinstance(metadata, dict):
             return 0.0
-        scores = metadata.get('scores', {})
-        if not scores:
-            return 0.0
-        return max(scores.values())
+        scores = metadata.get("scores", {})
+        return max(scores.values()) if scores else 0.0
 
     @staticmethod
     def truncate_text(text: str, max_length: int = 80) -> str:
-        """Truncate text with ellipsis"""
         if not isinstance(text, str):
             return ""
-        if len(text) <= max_length:
-            return text
-        return text[:max_length] + "..."
+        return text if len(text) <= max_length else text[:max_length] + "..."
