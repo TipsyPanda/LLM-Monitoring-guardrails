@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from loguru import logger
 
-from src.models.alert import Alert, DangerLevel
+from src.models.alert import Alert, DangerLevel, AlertStatus
 
 
 class AlertGenerator:
@@ -41,6 +41,19 @@ class AlertGenerator:
     # ------------------------------------------------------------------
     # Core API
     # ------------------------------------------------------------------
+
+    def reclassify_danger_level(self, window_score: float) -> Optional[DangerLevel]:
+        """
+        Public method to reclassify danger level based on window score.
+        Used by AlertStateManager when updating alerts.
+
+        Args:
+            window_score: Aggregated window score
+
+        Returns:
+            DangerLevel if score exceeds thresholds, None otherwise
+        """
+        return self._classify_danger_level(window_score)
 
     def generate_alert(
         self,
@@ -93,11 +106,16 @@ class AlertGenerator:
             violation_count=len(violations),
             window_size_minutes=self.window_size_minutes,
 
-            # 🔥 canonical alert time
+            # 🔥 canonical alert time (first seen)
             timestamp=earliest_ingested_at,
 
             # audit metadata
             generated_at=datetime.now(timezone.utc),
+
+            # state management
+            status=AlertStatus.ACTIVE,
+            last_updated=earliest_ingested_at,
+
             summary=self._build_summary(violations),
         )
 

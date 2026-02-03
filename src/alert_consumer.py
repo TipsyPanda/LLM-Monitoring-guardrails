@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from src.config import AlertConfig
 from src.alert.window_tracker import SlidingWindowTracker
 from src.alert.alert_generator import AlertGenerator
+from src.alert.alert_state_manager import AlertStateManager
 
 
 class AlertConsumerService:
@@ -16,7 +17,8 @@ class AlertConsumerService:
     Core principle:
     - Sliding window accumulates violations
     - AlertGenerator is the ONLY policy decision engine
-    - Windows are cleared ONLY after an alert is emitted
+    - AlertStateManager maintains alert lifecycle (create, update, expire)
+    - Alerts persist as "active" until they expire beyond time window
     """
 
     def __init__(self, config: AlertConfig):
@@ -42,12 +44,24 @@ class AlertConsumerService:
             high_threshold=config.HIGH_THRESHOLD,
         )
 
+        # NEW: Alert state manager
         output_path = Path(config.OUTPUT_FILE)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        self.alert_state_manager = AlertStateManager(
+            alerts_file=config.OUTPUT_FILE,
+            window_size_seconds=config.WINDOW_SIZE_SECONDS,
+        )
+
+        # Periodic cleanup tracking
+        self.last_cleanup = datetime.now(timezone.utc)
+        self.cleanup_interval_seconds = 60  # Check for expired alerts every 60s
 
         self.stats = {
             "violations_processed": 0,
             "alerts_generated": 0,
+            "alerts_updated": 0,
+            "alerts_expired": 0,
             "alerts_by_level": {"low": 0, "medium": 0, "high": 0},
         }
 
@@ -68,9 +82,8 @@ class AlertConsumerService:
         logger.info("=" * 60)
 
         try:
-            with open(self.config.OUTPUT_FILE, "a") as alert_file:
-                for message in self.consumer:
-                    self.process_violation(message.value, alert_file)
+            for message in self.consumer:
+                self.process_violation(message.value)
 
         except KeyboardInterrupt:
             logger.warning("Shutdown requested by user")
@@ -80,7 +93,7 @@ class AlertConsumerService:
 
     # ------------------------------------------------------------------
 
-    def process_violation(self, violation: dict, alert_file):
+    def process_violation(self, violation: dict):
         self.stats["violations_processed"] += 1
 
         conv_id = violation["conversation_id"]
@@ -102,37 +115,73 @@ class AlertConsumerService:
             f"window_score={self.window_tracker.get_window_score(conv_id):.4f}"
         )
 
-        # 2️⃣ Get current window violations
+        # 2️⃣ Get current window violations and score
         violations = self.window_tracker.get_violations(conv_id)
+        window_score = self.window_tracker.get_window_score(conv_id)
 
-        # 3️⃣ Policy decision (ONLY place where alerts are decided)
-        alert = self.alert_generator.generate_alert(
-            conversation_id=conv_id,
-            violations=violations,
-        )
+        # 3️⃣ Check for existing active alert
+        existing_alert = self.alert_state_manager.get_active_alert(conv_id)
 
-        # 4️⃣ No alert → keep window open
-        if alert is None:
-            logger.debug(
-                f"[Consumer] no alert "
-                f"conversation={conv_id} "
-                f"window_size={len(violations)}"
+        if existing_alert:
+            # UPDATE existing alert with new violations
+            danger_level = self.alert_generator.reclassify_danger_level(window_score)
+
+            if danger_level is not None:
+                updated_alert = self.alert_state_manager.update_alert(
+                    conversation_id=conv_id,
+                    violations=violations,
+                    window_score=window_score,
+                    danger_level=danger_level,
+                )
+                self.stats["alerts_updated"] += 1
+                self._output_alert_console(updated_alert)
+            else:
+                logger.debug(
+                    f"[Consumer] alert exists but score below threshold "
+                    f"conversation={conv_id} score={window_score:.4f}"
+                )
+        else:
+            # NEW alert evaluation
+            alert = self.alert_generator.generate_alert(
+                conversation_id=conv_id,
+                violations=violations,
             )
-            return
 
-        # 5️⃣ Alert emitted → clear window
-        logger.debug(
-            f"[Consumer] clearing window after alert "
-            f"conversation={conv_id}"
-        )
-        self.window_tracker.clear_window(conv_id)
+            if alert:
+                # CREATE new alert
+                self.alert_state_manager.create_alert(alert)
+                self.stats["alerts_generated"] += 1
+                self.stats["alerts_by_level"][alert.danger_level.value] += 1
+                self._output_alert_console(alert)
+            else:
+                logger.debug(
+                    f"[Consumer] no alert "
+                    f"conversation={conv_id} "
+                    f"window_size={len(violations)}"
+                )
 
-        # Stats
-        self.stats["alerts_generated"] += 1
-        self.stats["alerts_by_level"][alert.danger_level.value] += 1
+        # 4️⃣ Periodic cleanup of expired alerts
+        self._maybe_expire_alerts()
 
-        self._output_alert_console(alert)
-        self._output_alert_file(alert, alert_file)
+    # ------------------------------------------------------------------
+
+    def _maybe_expire_alerts(self):
+        """
+        Periodically check and expire stale alerts.
+        Called after each violation is processed.
+        """
+        now = datetime.now(timezone.utc)
+        elapsed = (now - self.last_cleanup).total_seconds()
+
+        if elapsed >= self.cleanup_interval_seconds:
+            expired = self.alert_state_manager.expire_stale_alerts()
+            if expired:
+                self.stats["alerts_expired"] += len(expired)
+                logger.info(
+                    f"[ALERTS EXPIRED] count={len(expired)} "
+                    f"conversations={expired}"
+                )
+            self.last_cleanup = now
 
     # ------------------------------------------------------------------
 
@@ -155,10 +204,6 @@ class AlertConsumerService:
             f"  labels={', '.join(alert.summary.get('labels', []))}"
         )
 
-    def _output_alert_file(self, alert, alert_file):
-        alert_file.write(json.dumps(alert.to_dict()) + "\n")
-        alert_file.flush()
-
     # ------------------------------------------------------------------
 
     def _log_shutdown(self):
@@ -166,6 +211,8 @@ class AlertConsumerService:
         logger.info("Shutting down Alert Consumer Service")
         logger.info(f"Violations processed: {self.stats['violations_processed']}")
         logger.info(f"Alerts generated: {self.stats['alerts_generated']}")
+        logger.info(f"Alerts updated: {self.stats['alerts_updated']}")
+        logger.info(f"Alerts expired: {self.stats['alerts_expired']}")
         logger.info(f"Alerts by level: {self.stats['alerts_by_level']}")
         logger.info("=" * 60)
 
