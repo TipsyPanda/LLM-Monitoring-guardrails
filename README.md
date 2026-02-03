@@ -1,8 +1,8 @@
-# LLM Guardrails Monitoring 3.0
+# LLM Guardrails Monitoring
 
 ## Project Goal
 
-**Real-time toxicity detection for LLM conversations** - Monitor and filter harmful content before it reaches your users.
+**Real-time toxicity detection for LLM conversations** - Monitor and filter harmful content before it reaches the users.
 
 This system analyzes messages in real-time using machine learning (Detoxify), detects toxic content across 7 categories (insults, threats, hate speech, etc.), and provides a live monitoring dashboard with alerts.
 
@@ -1549,6 +1549,7 @@ tail -5 outputs/alerts.jsonl
 ---
 
 ## License
+Project Members: Abraham, Chiara, Yannick
 
 Apache License 2.0
 
