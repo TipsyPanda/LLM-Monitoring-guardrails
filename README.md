@@ -491,12 +491,20 @@ Input Message
 ```
 
 #### 5. Alert Consumer (Container)
-**Role:** Aggregates violations over time and generates alerts.
+**Role:** Aggregates violations over time, generates alerts, and tracks alert lifecycle.
 
 **Why Aggregation?**
 - Single violations may be false positives
 - Patterns over time indicate real problems
 - Reduces alert fatigue for operators
+- **NEW:** Prevents duplicate alerts through state management
+
+**Key Features:**
+- **Sliding Window**: 5-minute time window per conversation
+- **Score Aggregation**: Cumulative violation scores
+- **Deduplication**: One alert per conversation (updates instead of duplicates)
+- **Lifecycle Tracking**: Active alerts expire after window duration
+- **Atomic Persistence**: Crash-safe state management
 
 **Sliding Window Algorithm:**
 ```
@@ -517,7 +525,7 @@ Violations in window:
     window_score = Σ = 2.53
                   │
                   ▼
-    2.53 >= 0.80 → HIGH ALERT 
+    2.53 >= 0.80 → HIGH ALERT
 ```
 
 **Alert Thresholds:**
@@ -526,6 +534,31 @@ Violations in window:
 | ≥ 0.15 | LOW | Log for review |
 | ≥ 0.40 | MEDIUM | Notify moderator |
 | ≥ 0.80 | HIGH | Immediate action |
+
+### Alert Lifecycle & Deduplication
+
+The system tracks alert state to prevent duplicate alerts for the same conversation:
+
+**Active Alert Behavior:**
+```
+Violation 1 arrives → HIGH alert created (status=active, count=1, score=1.56)
+Violation 2 arrives → Alert UPDATED (count=2, score=3.12)
+Violation 3 arrives → Alert UPDATED (count=3, score=4.68)
+... 5 minutes pass with no new violations ...
+Periodic cleanup → Alert marked inactive (status=inactive)
+```
+
+**Result:** One alert per conversation per time window (no duplicates)
+
+**Alert States:**
+- **Active**: Alert is within the time window and may receive updates
+- **Inactive**: Alert has expired (no violations for 5+ minutes)
+
+**Benefits:**
+- ✅ Eliminates duplicate alerts
+- ✅ Shows violation accumulation over time
+- ✅ Tracks alert lifecycle (active → inactive)
+- ✅ Maintains audit trail of all alerts
 
 #### 6. Dashboard (Port 8501)
 **Role:** Real-time visualization and monitoring interface.
@@ -738,18 +771,30 @@ docker logs -f llm-guardrails-kafka
   "violation_count": 4,
   "window_size_minutes": 5,
   "timestamp": "2025-01-31T10:35:00Z",
+  "generated_at": "2025-01-31T10:35:00Z",
+  "status": "active",
+  "last_updated": "2025-01-31T10:39:45Z",
   "summary": {
-    "labels": ["toxicity", "insult", "threat"],
-    "max_severity": "high",
-    "violations": [
-      {"score": 0.45, "severity": "low"},
-      {"score": 0.85, "severity": "high"},
-      {"score": 0.32, "severity": "low"},
-      {"score": 0.91, "severity": "high"}
-    ]
+    "total_violations": 4,
+    "labels": ["toxicity", "insult", "threat"]
   }
 }
 ```
+
+**Field Descriptions:**
+| Field | Description |
+|-------|-------------|
+| `alert_id` | Unique alert identifier |
+| `conversation_id` | Associated conversation |
+| `danger_level` | Alert severity: "low", "medium", or "high" |
+| `window_score` | Sum of violation scores in time window |
+| `violation_count` | Number of violations aggregated |
+| `window_size_minutes` | Time window duration (default: 5 minutes) |
+| `timestamp` | First seen time (earliest violation in window) |
+| `generated_at` | Alert creation time |
+| `status` | Alert state: "active" (within window) or "inactive" (expired) |
+| `last_updated` | Most recent violation time |
+| `summary` | Aggregated labels and metadata |
 
 ### Consumer Groups
 
@@ -1198,7 +1243,15 @@ Data loading utilities for violations and alerts.
   "danger_level": "high",
   "window_score": 1.62,
   "violation_count": 3,
-  "timestamp": "2025-01-31T10:30:00+00:00"
+  "window_size_minutes": 5,
+  "timestamp": "2025-01-31T10:30:00+00:00",
+  "generated_at": "2025-01-31T10:30:00+00:00",
+  "status": "active",
+  "last_updated": "2025-01-31T10:32:15+00:00",
+  "summary": {
+    "total_violations": 3,
+    "labels": ["toxicity", "insult"]
+  }
 }
 ```
 
