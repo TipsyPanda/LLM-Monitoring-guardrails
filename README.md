@@ -297,7 +297,7 @@ The Guardrails token is required for the toxicity detection validators.
 5. Click **"Create New API Key"**
 6. Copy the token and paste it in your `.env` file:
    ```env
-   GUARDRAILS_TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   GUARDRAILS_TOKEN=...
    ```
 
 > **Note:** The token starts with `eyJ...` and is quite long. Make sure to copy the entire string.
@@ -314,7 +314,7 @@ The HuggingFace token is only needed if you want to load the LMSYS dataset direc
 6. Click **"Generate token"**
 7. Copy the token and paste it in your `.env` file:
    ```env
-   HF_TOKEN=hf_aBcDeFgHiJkLmNoPqRsTuVwXyZ...
+   HF_TOKEN=...
    ```
 
 #### LMSYS Dataset Access (Additional Step)
